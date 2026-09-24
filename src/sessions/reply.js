@@ -2,6 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 
 export const COMMIT_BUTTON_ID = 'claude-session:commit';
 export const KEEP_GOING_BUTTON_ID = 'claude-session:keep-going';
+export const EXIT_BUTTON_ID = 'claude-session:exit';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
 export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
 export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
@@ -53,18 +54,36 @@ export function parseOptionsBlock(replyText) {
 }
 
 /**
- * The Commit / Keep Going action row shown after each Claude reply.
+ * The Commit / Keep Going / Exit action row shown after each Claude reply.
  * Commit commits everything changed so far, opens a PR, and immediately
  * merges it into the default branch (see manager.js commitAndMerge).
+ * Exit closes the session (discarding anything uncommitted).
+ *
+ * Once Commit or Keep Going is clicked on a given message, that message's
+ * row collapses to just a disabled "used" version of whichever was
+ * clicked, alongside a fresh, still-live Exit button — Exit is meant to
+ * stay usable on every past message, not just the newest one.
  */
-export function buildPostReplyRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(KEEP_GOING_BUTTON_ID)
-      .setLabel('Keep Going')
-      .setStyle(ButtonStyle.Secondary),
-  );
+export function buildPostReplyRow({ used } = {}) {
+  const row = new ActionRowBuilder();
+
+  if (used === 'commit') {
+    row.addComponents(
+      new ButtonBuilder().setCustomId('noop:committed').setLabel('Committed ✓').setStyle(ButtonStyle.Success).setDisabled(true),
+    );
+  } else if (used === 'keep-going') {
+    row.addComponents(
+      new ButtonBuilder().setCustomId('noop:kept-going').setLabel('Kept Going ✓').setStyle(ButtonStyle.Secondary).setDisabled(true),
+    );
+  } else {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(KEEP_GOING_BUTTON_ID).setLabel('Keep Going').setStyle(ButtonStyle.Secondary),
+    );
+  }
+
+  row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
+  return row;
 }
 
 /** The Push / Exit choice shown by `/code close`. */
@@ -79,21 +98,29 @@ export function buildClosePromptRow() {
 }
 
 /**
- * A row of option buttons. Each button's customId only carries an index
+ * The option buttons row plus a second row with Exit — a message can hold
+ * multiple action rows, and option buttons can already fill a row to its
+ * 5-button cap, so Exit gets its own row rather than competing for space.
+ * Each option button's customId only carries an index
  * (`claude-session:option:<n>`) — the option text itself is looked up
  * server-side from the session's `pendingOptions` (see handlers.js),
  * since Discord customIds are capped at 100 chars and option text can
  * exceed that once combined with a prefix.
  */
-export function buildOptionsRow(options) {
-  const row = new ActionRowBuilder();
+export function buildOptionsRows(options) {
+  const optionsRow = new ActionRowBuilder();
   options.forEach((label, i) => {
-    row.addComponents(
+    optionsRow.addComponents(
       new ButtonBuilder()
         .setCustomId(`${OPTION_BUTTON_PREFIX}${i}`)
         .setLabel(label.slice(0, 80))
         .setStyle(ButtonStyle.Primary),
     );
   });
-  return row;
+
+  const exitRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger),
+  );
+
+  return [optionsRow, exitRow];
 }

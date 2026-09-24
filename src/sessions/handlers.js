@@ -4,12 +4,13 @@ import { buildRepoPickerReply, REPO_SELECT_ID } from './repo-picker.js';
 import { createSessionChannel } from './channel.js';
 import {
   buildPostReplyRow,
-  buildOptionsRow,
+  buildOptionsRows,
   buildClosePromptRow,
   chunkMessage,
   parseOptionsBlock,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
+  EXIT_BUTTON_ID,
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
@@ -137,7 +138,7 @@ async function runTurn(session, channel, text, sessionManager) {
     if (options) {
       await channel.send({
         content: `Pick one:${suffix}`,
-        components: [buildOptionsRow(options)],
+        components: buildOptionsRows(options),
       });
     } else {
       await channel.send({
@@ -179,15 +180,27 @@ export async function handleSessionMessage(message, sessionManager) {
   await runTurn(session, message.channel, text, sessionManager);
 }
 
-/** Commit button on a reply — commits, opens a PR, and merges it into the default branch. */
+/**
+ * Commit button on a reply — commits, opens a PR, and merges it into the
+ * default branch. Collapses this message's row to a disabled "Committed"
+ * button (keeping a fresh, still-live Exit button) so it can't be clicked
+ * again from here.
+ */
 export async function handleCommitButton(interaction, sessionManager) {
   const session = sessionManager.getByChannel(interaction.channelId);
   if (!session) {
     await interaction.reply({ content: 'No active session in this channel.', flags: MessageFlags.Ephemeral });
     return;
   }
+  if (session.busy) {
+    await interaction.reply({
+      content: "⏳ Claude's still working on a newer message — try Commit again once it replies.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
-  await interaction.deferUpdate();
+  await interaction.update({ components: [buildPostReplyRow({ used: 'commit' })] });
   try {
     const outcome = await sessionManager.commitAndMerge(session);
     await interaction.followUp(
@@ -201,9 +214,41 @@ export async function handleCommitButton(interaction, sessionManager) {
   }
 }
 
+/** Keep Going button on a reply — no-op besides collapsing this message's row. */
 export async function handleKeepGoingButton(interaction) {
-  await interaction.deferUpdate();
-  // No-op: just acknowledges the button so it stops showing "interaction failed".
+  await interaction.update({ components: [buildPostReplyRow({ used: 'keep-going' })] });
+}
+
+/**
+ * Exit button — shown on every reply (not just the newest), and stays
+ * live even after Commit/Keep Going is used on that message. Closes the
+ * session, discarding anything not already committed. Works from any
+ * message's row since they all reference the same underlying session.
+ */
+export async function handleExitButton(interaction, sessionManager) {
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (!session) {
+    await interaction.reply({ content: 'This session is already closed.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (session.busy) {
+    await interaction.reply({
+      content: "⏳ Claude's still working on the previous message — try Exit again once it replies.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.update({ components: [] });
+  await closeWithoutCommitting(interaction.channel, session, sessionManager);
+}
+
+/** Shared by the inline Exit button and the /code close Exit button. */
+async function closeWithoutCommitting(channel, session, sessionManager) {
+  await channel.send('👋 Closing without committing...');
+  await sessionManager.close(session);
+  await channel.send('Closed — nothing was committed. This channel will be removed shortly.');
+  await deleteChannelSoon(channel);
 }
 
 /** Click on one of the multiple-choice option buttons rendered from a ```options block. */
@@ -267,6 +312,13 @@ export async function handleClosePushButton(interaction, sessionManager) {
     await interaction.update({ content: 'This session is already closed.', components: [] });
     return;
   }
+  if (session.busy) {
+    await interaction.reply({
+      content: "⏳ Claude's still working on a message — try again once it replies.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   await interaction.update({ content: '📦 Committing and closing...', components: [] });
   try {
@@ -292,17 +344,23 @@ export async function handleCloseExitButton(interaction, sessionManager) {
     await interaction.update({ content: 'This session is already closed.', components: [] });
     return;
   }
+  if (session.busy) {
+    await interaction.reply({
+      content: "⏳ Claude's still working on a message — try again once it replies.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
-  await interaction.update({ content: '👋 Closing without committing...', components: [] });
-  await sessionManager.close(session);
-  await interaction.channel.send('Closed — nothing was committed. This channel will be removed shortly.');
-  await deleteChannelSoon(interaction.channel);
+  await interaction.update({ content: '👋 Closing...', components: [] });
+  await closeWithoutCommitting(interaction.channel, session, sessionManager);
 }
 
 export {
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
+  EXIT_BUTTON_ID,
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,

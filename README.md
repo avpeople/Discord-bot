@@ -32,17 +32,25 @@ trust to make that call.
    downloaded to a folder *outside* the repo checkout — never committed —
    and referenced by path in the prompt so Claude can read it
    ([src/sessions/attachments.js](src/sessions/attachments.js)).
-4. After each reply, **Commit** / **Keep Going** buttons appear:
+4. After each reply, **Commit** / **Keep Going** / **Exit** buttons appear:
    - **Commit** commits everything changed since the last commit, opens a
      PR, and immediately merges it (squash) into the repo's default
      branch. The session then re-branches off the freshly-updated default
      branch so it can keep going and commit again later
      ([src/sessions/manager.js](src/sessions/manager.js) `commitAndMerge`).
-   - **Keep Going** just dismisses the buttons; changes stay uncommitted.
+     Clicking it collapses that message's row to a disabled "Committed ✓".
+   - **Keep Going** just collapses that message's row to "Kept Going ✓";
+     changes stay uncommitted.
+   - **Exit** closes the session (discarding anything not already
+     committed) and removes the channel. Unlike Commit/Keep Going, Exit
+     stays live on every past reply — not just the newest — so you can
+     bail out from any point in the conversation, even after using
+     Commit/Keep Going on that same message.
 5. If Claude offers a genuine multiple-choice decision, real Discord
    buttons appear instead of prose — click one and it's sent back into the
    conversation as your next message
    ([src/sessions/reply.js](src/sessions/reply.js) `parseOptionsBlock`).
+   An Exit button is included alongside the options.
 6. `/code close` (run inside the session channel) asks **Push** (commit
    anything pending the same way Commit does, then close) or **Exit**
    (close without committing — pending changes are discarded).

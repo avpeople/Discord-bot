@@ -9,12 +9,14 @@ import {
   handleSessionMessage,
   handleCommitButton,
   handleKeepGoingButton,
+  handleExitButton,
   handleOptionButton,
   handleClosePushButton,
   handleCloseExitButton,
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
+  EXIT_BUTTON_ID,
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
@@ -63,6 +65,10 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === KEEP_GOING_BUTTON_ID) {
       return handleKeepGoingButton(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId === EXIT_BUTTON_ID) {
+      return handleExitButton(interaction, sessionManager);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith(OPTION_BUTTON_PREFIX)) {
