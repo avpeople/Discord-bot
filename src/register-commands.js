@@ -4,24 +4,16 @@ import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 const commands = [
   new SlashCommandBuilder()
     .setName('code')
-    .setDescription('Run Claude Code against a GitHub repo and open a PR with the changes')
-    .addStringOption((opt) =>
-      opt
-        .setName('repo')
-        .setDescription('owner/name of the GitHub repo')
-        .setRequired(true),
+    .setDescription('Manage interactive Claude Code sessions')
+    .addSubcommand((sub) =>
+      sub
+        .setName('new')
+        .setDescription('Start a new Claude Code session: pick a repo, get a private channel to chat in'),
     )
-    .addStringOption((opt) =>
-      opt
-        .setName('prompt')
-        .setDescription('What should Claude change or do in this repo?')
-        .setRequired(true),
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('base')
-        .setDescription('Base branch to branch off / PR into (default: repo default branch)')
-        .setRequired(false),
+    .addSubcommand((sub) =>
+      sub
+        .setName('close')
+        .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
     )
     .toJSON(),
 ];

@@ -25,4 +25,5 @@ export const config = {
     apiKey: process.env.ANTHROPIC_API_KEY || null,
   },
   workspaceDir: process.env.WORKSPACE_DIR || '/data/workspaces',
+  sessionsStatePath: process.env.SESSIONS_STATE_PATH || '/data/claude-config/discord-sessions.json',
 };

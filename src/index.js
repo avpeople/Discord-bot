@@ -1,78 +1,84 @@
-import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, MessageFlags } from 'discord.js';
 import { config } from './config.js';
-import { runCodeJob } from './job.js';
+import { SessionManager } from './sessions/manager.js';
+import {
+  hasAccess,
+  handleCodeNew,
+  handleCodeClose,
+  handleRepoSelected,
+  handleSessionMessage,
+  handlePushButton,
+  handleKeepGoingButton,
+  REPO_SELECT_ID,
+  PUSH_BUTTON_ID,
+  KEEP_GOING_BUTTON_ID,
+} from './sessions/handlers.js';
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  partials: [Partials.Channel],
+});
 
-// Simple in-memory guard against overlapping jobs per channel; Claude Code
-// jobs are heavy (git + subprocess), so we don't want two running in the
-// same channel at once. Fine for a single-container deployment.
-const runningInChannel = new Set();
+const sessionManager = new SessionManager();
 
-function hasAccess(interaction) {
-  const member = interaction.member;
-  if (!member || !member.roles) return false;
-  const roles = member.roles.cache ?? member.roles;
-  return roles.has ? roles.has(config.discord.allowedRoleId) : roles.includes(config.discord.allowedRoleId);
-}
-
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  const restored = sessionManager.restore();
+  if (restored.length > 0) {
+    console.log(`Restored ${restored.length} session(s) from disk.`);
+  }
+  for (const session of restored) {
+    const channel = await client.channels.fetch(session.channelId).catch(() => null);
+    if (channel) {
+      await channel
+        .send('🔄 Bot restarted — this session is back and remembers the conversation. Carry on!')
+        .catch((err) => console.error('Failed to post restore notice:', err));
+    }
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== 'code') return;
-
-  if (!hasAccess(interaction)) {
-    await interaction.reply({
-      content: "You don't have permission to use this command.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (runningInChannel.has(interaction.channelId)) {
-    await interaction.reply({
-      content: '⏳ A Claude Code job is already running in this channel. Wait for it to finish.',
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  const repoSlug = interaction.options.getString('repo', true);
-  const prompt = interaction.options.getString('prompt', true);
-  const base = interaction.options.getString('base') || undefined;
-
-  await interaction.deferReply();
-  runningInChannel.add(interaction.channelId);
-
-  let lastEdit = Promise.resolve();
-  const onProgress = (text) => {
-    lastEdit = lastEdit.then(() => interaction.editReply(text)).catch((err) => {
-      console.error('Failed to edit reply:', err);
-    });
-  };
-
   try {
-    const outcome = await runCodeJob({ repoSlug, prompt, base, onProgress });
-    await lastEdit;
+    if (interaction.isChatInputCommand() && interaction.commandName === 'code') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'new') return handleCodeNew(interaction);
+      if (sub === 'close') return handleCodeClose(interaction, sessionManager);
+      return;
+    }
 
-    if (!outcome.pushed) {
-      await interaction.editReply(
-        `✅ Claude Code ran on \`${repoSlug}\` but made no changes to commit.\n\n${outcome.summary ?? ''}`.slice(0, 2000),
-      );
-    } else {
-      await interaction.editReply(
-        `✅ Done! Opened **${outcome.pr.html_url}**\n\n${outcome.summary ?? ''}`.slice(0, 2000),
-      );
+    if (interaction.isStringSelectMenu() && interaction.customId === REPO_SELECT_ID) {
+      return handleRepoSelected(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === PUSH_BUTTON_ID) {
+      return handlePushButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === KEEP_GOING_BUTTON_ID) {
+      return handleKeepGoingButton(interaction);
     }
   } catch (err) {
-    console.error(err);
-    await lastEdit;
-    await interaction.editReply(`❌ Job failed: ${err.message}`.slice(0, 2000));
-  } finally {
-    runningInChannel.delete(interaction.channelId);
+    console.error('Unhandled interaction error:', err);
+    const payload = { content: `❌ Something went wrong: ${err.message}`.slice(0, 2000) };
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp(payload).catch(() => {});
+    } else {
+      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+  }
+});
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!sessionManager.getByChannel(message.channelId)) return;
+  if (!hasAccess({ member: message.member })) return;
+
+  try {
+    await handleSessionMessage(message, sessionManager);
+  } catch (err) {
+    console.error('Unhandled session message error:', err);
+    await message.reply(`❌ Something went wrong: ${err.message}`.slice(0, 2000)).catch(() => {});
   }
 });
 
