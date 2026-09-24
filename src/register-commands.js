@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
 
 const commands = [
   new SlashCommandBuilder()
@@ -54,6 +54,49 @@ const commands = [
         )
         .addStringOption((opt) =>
           opt.setName('description').setDescription('Embed description (optional)').setRequired(false),
+        ),
+    )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('voice')
+    .setDescription('Bridge a Discord voice channel to a LiveKit channel (Coms server)')
+    .addSubcommand((sub) =>
+      sub
+        .setName('join')
+        .setDescription('Bridge a voice channel to a LiveKit channel')
+        .addStringOption((opt) =>
+          opt.setName('room').setDescription('The LiveKit channel id to bridge to').setRequired(true),
+        )
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The Discord voice channel to bridge')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('leave')
+        .setDescription('Disconnect a voice channel from its LiveKit bridge')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The bridged Discord voice channel')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('status')
+        .setDescription('Check whether a voice channel is currently bridged')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The Discord voice channel to check')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
         ),
     )
     .toJSON(),

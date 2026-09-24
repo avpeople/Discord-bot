@@ -174,6 +174,40 @@ If you'd rather not deal with re-authenticating on a headless server, set
 `ANTHROPIC_API_KEY` instead (API billing, no login step needed) — the bot
 picks it up automatically and skips subscription auth.
 
+## Voice bridge (Discord ↔ LiveKit, optional)
+
+`/voice join room:<liveKitChannelId> channel:#voice` bridges a Discord
+voice channel to a LiveKit channel two-way, via a separate service —
+`bridge-discord`, in the Coms server repo (`bridge-discord/README.md`
+there is the authoritative reference for how it works and its exact
+control API). This bot's [src/voice/](src/voice) is just a thin client
+that tells that service to start/stop a pairing; it does no audio work
+itself.
+
+- `/voice join room:<id> channel:#voice` — starts a pairing, keyed by the
+  Discord voice channel's id (so joining the same channel twice targets
+  the same pairing rather than creating a duplicate).
+- `/voice leave channel:#voice` — stops it.
+- `/voice status channel:#voice` — checks whether a channel is currently
+  bridged and each side's connection state.
+
+All three require **Manage Channels** — separate from `ALLOWED_ROLE_ID`
+and Manage Roles, since this is infra-level, not session or role access.
+
+Set `BRIDGE_DISCORD_URL` (and `BRIDGE_DISCORD_API_KEY` if that service has
+one configured) to enable `/voice` — leave both unset and it's disabled
+with a clear message rather than erroring. Deploy `bridge-discord` itself
+separately (its own README covers that); this bot never runs voice
+audio in-process.
+
+**Status**: the control API client
+([src/voice/bridge-client.js](src/voice/bridge-client.js)) is verified
+against a mock server matching the documented contract exactly (create,
+duplicate-id error, get, leave, idempotent re-leave). The actual
+`bridge-discord` service it talks to has not been tested against live
+Discord/LiveKit traffic as of this writing — see its own README's status
+section before relying on this in production.
+
 ## Notes / things to tune
 
 - **Tool permissions**: [src/sessions/session.js](src/sessions/session.js)

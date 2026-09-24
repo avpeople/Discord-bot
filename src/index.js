@@ -33,6 +33,7 @@ import {
   isApproveButton,
   isDenyButton,
 } from './welcome/handlers.js';
+import { handleVoiceJoin, handleVoiceLeave, handleVoiceStatus } from './voice/handlers.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -73,6 +74,14 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'remove-role') return handleWelcomeRemoveRole(interaction);
       if (sub === 'set-approval-channel') return handleWelcomeSetApprovalChannel(interaction);
       if (sub === 'post') return handleWelcomePost(interaction);
+      return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'voice') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'join') return handleVoiceJoin(interaction);
+      if (sub === 'leave') return handleVoiceLeave(interaction);
+      if (sub === 'status') return handleVoiceStatus(interaction);
       return;
     }
 
