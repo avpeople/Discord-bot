@@ -12,6 +12,26 @@ export const DENY_BASH_BUTTON_ID = 'claude-session:deny-bash';
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
 
+/**
+ * Fallback for when Claude asserts it can't use Bash/a shell in prose
+ * without ever actually attempting the tool call — which means no
+ * tool_result denial ever fires (see session.js's OPTIONS_SYSTEM_PROMPT
+ * for the primary fix: instructing Claude to always try first). That
+ * instruction isn't 100% reliable in practice (confirmed recurring live,
+ * even in fresh sessions), so this is a second, independent detection
+ * path: scan the final reply text for the pattern "bash/shell ... not
+ * available/isn't enabled/can't run" and treat it the same as a real
+ * denial, offering the Approve/Deny prompt anyway. Deliberately requires
+ * BOTH a bash/shell-tool mention AND an unavailability phrase within a
+ * short span of each other, not just either alone, to avoid false
+ * positives on unrelated "I can't do X" sentences.
+ */
+export function looksLikeBashUnavailableClaim(replyText) {
+  return /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
+    replyText,
+  );
+}
+
 /** Splits long text into Discord-message-sized chunks, breaking on newlines where possible. */
 export function chunkMessage(text, maxLen = DISCORD_MAX_LEN) {
   if (text.length <= maxLen) return [text];

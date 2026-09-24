@@ -275,6 +275,21 @@ section before relying on this in production.
   Claude will almost always just run the same command it originally asked
   for — but the guardrail is "Bash is on for this turn," not "only this
   exact command."
+- **Detecting a Bash denial has two paths**, not one: the precise one is a
+  real `tool_result` error from an actual attempted call (see
+  `sendMessage` in [src/sessions/session.js](src/sessions/session.js)).
+  The system prompt tells Claude to always attempt the call rather than
+  assume it can't — but that instruction isn't 100% reliable in practice
+  (confirmed recurring live, in fresh sessions, more than once). As a
+  backstop, [src/sessions/reply.js](src/sessions/reply.js)'s
+  `looksLikeBashUnavailableClaim` scans Claude's reply text for the
+  "bash/shell ... isn't available/enabled" pattern and offers the same
+  Approve/Deny prompt even when no real tool call was ever attempted. This
+  is a heuristic, not exact — it's deliberately narrow (requires both a
+  bash/shell mention and an unavailability phrase near each other) to
+  avoid false-triggering on unrelated sentences, but it can still miss
+  phrasings that don't match, or in principle misfire on something
+  genuinely unrelated that happens to read similarly.
 - **Concurrency**: one message is processed at a time per session
   (`session.busy` guard) — sending another message while Claude is still
   replying gets a "still working" notice rather than queuing or racing.

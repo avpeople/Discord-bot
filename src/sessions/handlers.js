@@ -10,6 +10,7 @@ import {
   buildBashApprovalRow,
   chunkMessage,
   parseOptionsBlock,
+  looksLikeBashUnavailableClaim,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
   EXIT_BUTTON_ID,
@@ -168,7 +169,15 @@ async function runTurn(session, channel, text, sessionManager, { allowBash = fal
     // Note: the real denial (see session.js) doesn't carry the specific
     // command Claude wanted to run, only "Bash isn't enabled" — so this
     // can't show the exact command, just that Bash was needed.
-    if (permissionDenials.length > 0) {
+    //
+    // Second, independent detection path: Claude sometimes asserts it
+    // can't use Bash in prose without ever attempting the tool call, so no
+    // permissionDenials entry exists (confirmed recurring live even with
+    // the system prompt telling it to always try first — that instruction
+    // alone isn't 100% reliable). Catch that pattern in the reply text and
+    // offer the same Approve/Deny prompt anyway.
+    const claimedUnavailable = permissionDenials.length === 0 && looksLikeBashUnavailableClaim(replyText);
+    if (permissionDenials.length > 0 || claimedUnavailable) {
       session.pendingApprovalText = text;
       await channel.send({
         content: '🔒 Claude wants to use a shell command (Bash), which is disabled by default.\n\nApprove it for this one attempt?',
