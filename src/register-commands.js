@@ -23,6 +23,14 @@ const commands = [
           opt.setName('channel').setDescription('The channel to use as the permanent picker').setRequired(true),
         ),
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-log-channel')
+        .setDescription('Set where session activity (opened, committed, closed, etc.) gets logged')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to log activity to').setRequired(true),
+        ),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName('welcome')

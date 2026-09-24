@@ -21,6 +21,7 @@ import {
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 import { downloadImageAttachments } from './attachments.js';
+import { logEvent } from '../log-channel.js';
 
 export function hasAccess(interaction) {
   const member = interaction.member;
@@ -70,6 +71,7 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
   const session = await sessionManager.createSession({
     id,
     channelId: channel.id,
+    guildId: guild.id,
     ownerId: user.id,
     owner,
     repo: name,
@@ -84,6 +86,8 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
       `Run \`/code close\` when you're done — it'll ask whether to commit first or just exit.\n` +
       `Idle for 4 hours with nothing committed will auto-close and discard pending changes.`,
   );
+
+  logEvent(guild.id, `🟢 ${user} opened a session on **${fullName}**: ${channel}`);
 
   return channel;
 }
@@ -247,6 +251,12 @@ export async function handleCommitButton(interaction, sessionManager) {
         ? `✅ Committed and merged **${outcome.pr.html_url}** into \`${session.defaultBranch}\`.`
         : 'Nothing to commit — no changes since last commit.',
     );
+    if (outcome) {
+      logEvent(
+        interaction.guildId,
+        `📦 ${interaction.user} committed on **${session.owner}/${session.repo}**: ${outcome.pr.html_url}`,
+      );
+    }
   } catch (err) {
     console.error(err);
     await interaction.followUp(`❌ Commit failed: ${err.message}`.slice(0, 2000));
@@ -317,6 +327,7 @@ export async function handleApproveBashButton(interaction, sessionManager) {
 
   session.pendingApprovalText = null;
   await interaction.update({ content: `${interaction.message.content}\n\n✅ Approved.`, components: [] });
+  logEvent(interaction.guildId, `🔓 ${interaction.user} approved a Bash request on **${session.owner}/${session.repo}**`);
   await runTurn(session, interaction.channel, text, sessionManager, { allowBash: true });
 }
 
@@ -325,6 +336,9 @@ export async function handleDenyBashButton(interaction, sessionManager) {
   const session = sessionManager.getByChannel(interaction.channelId);
   if (session) session.pendingApprovalText = null;
   await interaction.update({ content: `${interaction.message.content}\n\n🚫 Denied.`, components: [] });
+  if (session) {
+    logEvent(interaction.guildId, `🚫 ${interaction.user} denied a Bash request on **${session.owner}/${session.repo}**`);
+  }
 }
 
 /** Click on one of the multiple-choice option buttons rendered from a ```options block. */
@@ -399,7 +413,13 @@ export async function handleClosePushButton(interaction, sessionManager) {
   await interaction.update({ content: '📦 Committing and closing...', components: [] });
   try {
     const outcome = await sessionManager.commitAndMerge(session, `Claude Code session ${session.id} (final)`);
-    await sessionManager.close(session);
+    if (outcome) {
+      logEvent(
+        interaction.guildId,
+        `📦 ${interaction.user} committed on **${session.owner}/${session.repo}**: ${outcome.pr.html_url}`,
+      );
+    }
+    await sessionManager.close(session, 'push');
 
     await interaction.channel.send(
       outcome

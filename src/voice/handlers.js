@@ -1,6 +1,7 @@
 import { MessageFlags, PermissionsBitField, ChannelType } from 'discord.js';
 import { config } from '../config.js';
 import { isConfigured, createPairing, leavePairing, getPairing } from './bridge-client.js';
+import { logEvent } from '../log-channel.js';
 
 /** Same admin bar as the welcome panel — this is infra-level, not Claude-session access. */
 function canManage(member) {
@@ -64,6 +65,10 @@ export async function handleVoiceJoin(interaction) {
     await interaction.editReply(
       `✅ Bridged ${voiceChannel} to LiveKit channel \`${liveKitChannelId}\`. Run \`/voice leave channel:${voiceChannel.name}\` to disconnect it.`,
     );
+    logEvent(
+      interaction.guildId,
+      `🔊 ${interaction.user} bridged ${voiceChannel} ↔ LiveKit \`${liveKitChannelId}\``,
+    );
   } catch (err) {
     console.error(err);
     await interaction.editReply(`❌ Couldn't start the bridge: ${err.message}`.slice(0, 2000));
@@ -83,6 +88,9 @@ export async function handleVoiceLeave(interaction) {
     await interaction.editReply(
       left ? `✅ Disconnected ${voiceChannel} from the voice bridge.` : `${voiceChannel} wasn't bridged.`,
     );
+    if (left) {
+      logEvent(interaction.guildId, `🔇 ${interaction.user} disconnected the voice bridge on ${voiceChannel}`);
+    }
   } catch (err) {
     console.error(err);
     await interaction.editReply(`❌ Couldn't stop the bridge: ${err.message}`.slice(0, 2000));

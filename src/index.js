@@ -44,6 +44,8 @@ import {
   resyncPickerChannel,
 } from './sessions/picker-channel-handlers.js';
 import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
+import { handleSetLogChannel } from './log-channel-handlers.js';
+import { initLogChannel } from './log-channel.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -54,6 +56,7 @@ const sessionManager = new SessionManager();
 
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  initLogChannel(client);
 
   const restored = sessionManager.restore();
   if (restored.length > 0) {
@@ -83,6 +86,7 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'new') return handleCodeNew(interaction);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
       if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
+      if (sub === 'set-log-channel') return handleSetLogChannel(interaction);
       return;
     }
 

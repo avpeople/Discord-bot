@@ -12,6 +12,7 @@ import { openPullRequest, mergePullRequest, deleteBranch } from '../github.js';
 import { Session } from './session.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
 import { cleanupUploadsDir } from './attachments.js';
+import { logEvent } from '../log-channel.js';
 
 /**
  * Tracks all active per-channel Claude Code chat sessions and owns their
@@ -71,7 +72,7 @@ export class SessionManager {
     return crypto.randomUUID().slice(0, 8);
   }
 
-  async createSession({ id: providedId, channelId, ownerId, owner, repo, base }) {
+  async createSession({ id: providedId, channelId, guildId, ownerId, owner, repo, base }) {
     const id = providedId || crypto.randomUUID().slice(0, 8);
     const branchSuffix = `session-${id}`;
 
@@ -86,6 +87,7 @@ export class SessionManager {
     const session = new Session({
       id,
       channelId,
+      guildId,
       ownerId,
       owner,
       repo,
@@ -155,13 +157,21 @@ export class SessionManager {
    * Ends a session and removes its working directory. Does NOT commit —
    * call commitAndMerge first if you want pending changes saved; anything
    * still uncommitted at this point is discarded along with the directory.
+   * `reason` is just for the log line — 'exit', 'push', or 'idle'.
    */
-  async close(session) {
+  async close(session, reason = 'exit') {
     session.teardown();
     this.sessionsByChannel.delete(session.channelId);
     this._persist();
     await cleanupRepoDir(session.dir);
     await cleanupUploadsDir(session.dir);
+
+    const labels = {
+      exit: '🔴 Session closed (exit)',
+      push: '🔴 Session closed (pushed first)',
+      idle: '⏱️ Session auto-closed (4h idle timeout)',
+    };
+    logEvent(session.guildId, `${labels[reason] ?? labels.exit} on **${session.owner}/${session.repo}**`);
   }
 
   async _handleIdleExpire(session) {
@@ -171,7 +181,7 @@ export class SessionManager {
     await discardPendingChanges(session.git).catch((err) => {
       console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
     });
-    await this.close(session);
+    await this.close(session, 'idle');
     this.onIdleExpire?.(session);
   }
 }

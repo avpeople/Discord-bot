@@ -90,6 +90,25 @@ there's just a dropdown waiting, no need to run `/code new` each time.
   different channel moves it there; the old channel keeps whatever its
   last message was (nothing un-sets it automatically).
 
+## Activity log (optional)
+
+`/code set-log-channel channel:#audit-log` (requires **Manage Channels**)
+makes the bot post one line per significant event to that channel:
+
+- 🟢 a session is opened (who, repo, channel link)
+- 📦 a commit happens (who, repo, PR link) — from the Commit button or
+  Push-then-close
+- 🔴 a session is closed (exit or push-then-close) / ⏱️ auto-closed by the
+  4-hour idle timeout
+- 🔓 / 🚫 a Bash request is approved or denied
+- 🔊 / 🔇 a voice bridge is started or stopped (`/voice join` / `/voice leave`)
+
+Logging is best-effort ([src/log-channel.js](src/log-channel.js)) — if no
+log channel is set, or the bot can't reach it for any reason, it silently
+does nothing rather than ever failing the real action it's logging.
+Config is per-guild, persisted the same way as the picker channel and
+welcome panel config.
+
 ## Welcome panel (role requests)
 
 Separate from the Claude Code sessions: `/welcome` manages a self-serve

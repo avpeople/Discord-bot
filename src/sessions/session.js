@@ -36,6 +36,7 @@ export class Session {
   constructor({
     id,
     channelId,
+    guildId,
     ownerId,
     owner,
     repo,
@@ -49,6 +50,7 @@ export class Session {
   }) {
     this.id = id;
     this.channelId = channelId;
+    this.guildId = guildId;
     this.ownerId = ownerId;
     this.owner = owner;
     this.repo = repo;
@@ -80,6 +82,7 @@ export class Session {
     return {
       id: this.id,
       channelId: this.channelId,
+      guildId: this.guildId,
       ownerId: this.ownerId,
       owner: this.owner,
       repo: this.repo,
