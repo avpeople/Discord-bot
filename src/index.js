@@ -21,6 +21,18 @@ import {
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
 } from './sessions/handlers.js';
+import {
+  handleWelcomeAddRole,
+  handleWelcomeRemoveRole,
+  handleWelcomeSetApprovalChannel,
+  handleWelcomePost,
+  handleRoleRequestButton,
+  handleApproveButton,
+  handleDenyButton,
+  isRequestButton,
+  isApproveButton,
+  isDenyButton,
+} from './welcome/handlers.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -53,6 +65,27 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'new') return handleCodeNew(interaction);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
       return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'welcome') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'add-role') return handleWelcomeAddRole(interaction);
+      if (sub === 'remove-role') return handleWelcomeRemoveRole(interaction);
+      if (sub === 'set-approval-channel') return handleWelcomeSetApprovalChannel(interaction);
+      if (sub === 'post') return handleWelcomePost(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && isRequestButton(interaction.customId)) {
+      return handleRoleRequestButton(interaction);
+    }
+
+    if (interaction.isButton() && isApproveButton(interaction.customId)) {
+      return handleApproveButton(interaction);
+    }
+
+    if (interaction.isButton() && isDenyButton(interaction.customId)) {
+      return handleDenyButton(interaction);
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === REPO_SELECT_ID) {

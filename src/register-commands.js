@@ -16,6 +16,44 @@ const commands = [
         .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName('welcome')
+    .setDescription('Manage the welcome panel and its role requests')
+    .addSubcommand((sub) =>
+      sub
+        .setName('add-role')
+        .setDescription('Add a role people can request from the welcome panel')
+        .addRoleOption((opt) => opt.setName('role').setDescription('The role to make requestable').setRequired(true))
+        .addStringOption((opt) =>
+          opt.setName('label').setDescription('Button label (defaults to the role name)').setRequired(false),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('remove-role')
+        .setDescription('Remove a role from the welcome panel')
+        .addRoleOption((opt) => opt.setName('role').setDescription('The role to remove').setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-approval-channel')
+        .setDescription('Set where role requests get posted for approval')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The approval channel').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('post')
+        .setDescription('Post the welcome panel (with role-request buttons) in a channel')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('Where to post the panel').setRequired(true),
+        )
+        .addStringOption((opt) =>
+          opt.setName('message').setDescription('Custom panel text (optional)').setRequired(false),
+        ),
+    )
+    .toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

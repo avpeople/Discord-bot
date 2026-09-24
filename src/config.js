@@ -26,4 +26,5 @@ export const config = {
   },
   workspaceDir: process.env.WORKSPACE_DIR || '/data/workspaces',
   sessionsStatePath: process.env.SESSIONS_STATE_PATH || '/data/claude-config/discord-sessions.json',
+  welcomeStatePath: process.env.WELCOME_STATE_PATH || '/data/claude-config/discord-welcome.json',
 };

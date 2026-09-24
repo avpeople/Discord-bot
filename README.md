@@ -62,6 +62,36 @@ persisted to disk on the `claude-config` volume, so sessions survive a
 Coolify restart/redeploy — the bot reloads them on boot and posts a notice
 in each still-open channel.
 
+## Welcome panel (role requests)
+
+Separate from the Claude Code sessions: `/welcome` manages a self-serve
+role-request panel with an admin approval step, useful for e.g. letting
+people request the Claude Code access role themselves rather than you
+manually assigning it.
+
+- `/welcome add-role role:@Dev label:"Claude Code Access"` — adds a role
+  as a requestable button (label defaults to the role's own name).
+- `/welcome remove-role role:@Dev` — removes one.
+- `/welcome set-approval-channel channel:#role-requests` — where requests
+  get posted with Approve/Deny buttons.
+- `/welcome post channel:#welcome message:"..."` — posts (or re-posts) the
+  panel. Run it again after adding/removing roles to refresh an existing
+  panel's buttons.
+
+All four require the **Manage Roles** Discord permission — separate from
+`ALLOWED_ROLE_ID`, which only gates Claude Code session access.
+
+When someone clicks a role button: a request card goes to the approval
+channel, they get an ephemeral confirmation. An admin (anyone with Manage
+Roles) clicks **Approve** to grant the role or **Deny** to skip it; the
+card updates in place to show who decided and when, and the requester
+gets a DM if their DMs are open (best-effort — a closed DM doesn't block
+the approval).
+
+Config (which roles, which approval channel) is stored per-guild in
+[src/welcome/store.js](src/welcome/store.js), persisted to disk the same
+way as session state — no redeploy needed to change it.
+
 ## 1. Create the Discord application
 
 1. https://discord.com/developers/applications → New Application.
