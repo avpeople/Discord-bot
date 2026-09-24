@@ -5,11 +5,14 @@ import { createSessionChannel } from './channel.js';
 import {
   buildPostReplyRow,
   buildOptionsRow,
+  buildClosePromptRow,
   chunkMessage,
   parseOptionsBlock,
-  PUSH_BUTTON_ID,
+  COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
   OPTION_BUTTON_PREFIX,
+  CLOSE_PUSH_BUTTON_ID,
+  CLOSE_EXIT_BUTTON_ID,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 
@@ -76,9 +79,10 @@ export async function handleRepoSelected(interaction, sessionManager) {
     await channel.send(
       `👋 Session started for **${fullName}** on branch \`${session.branchName}\`.\n` +
         `Just chat here — send a message describing what you want changed. ` +
-        `Use the **Push** button after a reply to commit+push what's changed so far, ` +
-        `or run \`/code close\` when you're done to push, open a PR, and remove this channel.\n` +
-        `Idle for 4 hours with nothing pushed will auto-close and discard pending changes.`,
+        `Use the **Commit** button after a reply to commit what's changed so far and merge it straight into ` +
+        `\`${session.defaultBranch}\` (a PR is opened and auto-merged, so it's still reviewable on GitHub afterward). ` +
+        `Run \`/code close\` when you're done — it'll ask whether to commit first or just exit.\n` +
+        `Idle for 4 hours with nothing committed will auto-close and discard pending changes.`,
     );
   } catch (err) {
     console.error(err);
@@ -91,7 +95,7 @@ export async function handleRepoSelected(interaction, sessionManager) {
 
 /**
  * Sends `text` as the next turn in `session` and posts the reply into
- * `channel`, including Push/Keep Going buttons or option buttons if
+ * `channel`, including Commit/Keep Going buttons or option buttons if
  * Claude's reply ended with a ```options block. Shared by plain messages
  * and option-button clicks so both go through identical handling.
  */
@@ -160,7 +164,8 @@ export async function handleSessionMessage(message, sessionManager) {
   await runTurn(session, message.channel, message.content, sessionManager);
 }
 
-export async function handlePushButton(interaction, sessionManager) {
+/** Commit button on a reply — commits, opens a PR, and merges it into the default branch. */
+export async function handleCommitButton(interaction, sessionManager) {
   const session = sessionManager.getByChannel(interaction.channelId);
   if (!session) {
     await interaction.reply({ content: 'No active session in this channel.', flags: MessageFlags.Ephemeral });
@@ -169,13 +174,15 @@ export async function handlePushButton(interaction, sessionManager) {
 
   await interaction.deferUpdate();
   try {
-    const pushed = await sessionManager.push(session);
+    const outcome = await sessionManager.commitAndMerge(session);
     await interaction.followUp(
-      pushed ? `📦 Pushed to \`${session.branchName}\`.` : 'Nothing to push — no changes since last push.',
+      outcome
+        ? `✅ Committed and merged **${outcome.pr.html_url}** into \`${session.defaultBranch}\`.`
+        : 'Nothing to commit — no changes since last commit.',
     );
   } catch (err) {
     console.error(err);
-    await interaction.followUp(`❌ Push failed: ${err.message}`.slice(0, 2000));
+    await interaction.followUp(`❌ Commit failed: ${err.message}`.slice(0, 2000));
   }
 }
 
@@ -212,7 +219,7 @@ export async function handleOptionButton(interaction, sessionManager) {
   await runTurn(session, interaction.channel, label, sessionManager);
 }
 
-/** `/code close` — must be run inside an active session channel. */
+/** `/code close` — must be run inside an active session channel; asks Push or Exit. */
 export async function handleCodeClose(interaction, sessionManager) {
   if (!hasAccess(interaction)) return replyNoAccess(interaction);
 
@@ -225,24 +232,63 @@ export async function handleCodeClose(interaction, sessionManager) {
     return;
   }
 
-  await interaction.deferReply();
+  await interaction.reply({
+    content:
+      'Push any pending changes (commit + merge into the default branch) before closing, or exit without committing?',
+    components: [buildClosePromptRow()],
+  });
+}
+
+async function deleteChannelSoon(channel) {
+  setTimeout(() => {
+    channel.delete().catch((err) => console.error('Failed to delete session channel:', err));
+  }, 5000);
+}
+
+/** Push button from the /code close prompt — commits+merges, then closes. */
+export async function handleClosePushButton(interaction, sessionManager) {
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (!session) {
+    await interaction.update({ content: 'This session is already closed.', components: [] });
+    return;
+  }
+
+  await interaction.update({ content: '📦 Committing and closing...', components: [] });
   try {
-    await sessionManager.push(session, `Claude Code session ${session.id} (final)`);
-    const { pr } = await sessionManager.close(session);
+    const outcome = await sessionManager.commitAndMerge(session, `Claude Code session ${session.id} (final)`);
+    await sessionManager.close(session);
 
-    if (pr) {
-      await interaction.editReply(`✅ Opened **${pr.html_url}**. This channel will be removed shortly.`);
-    } else {
-      await interaction.editReply('✅ Closed — no changes were pushed, so no PR was opened. This channel will be removed shortly.');
-    }
-
-    setTimeout(() => {
-      interaction.channel.delete().catch((err) => console.error('Failed to delete session channel:', err));
-    }, 5000);
+    await interaction.channel.send(
+      outcome
+        ? `✅ Committed and merged **${outcome.pr.html_url}**. This channel will be removed shortly.`
+        : '✅ Closed — nothing to commit. This channel will be removed shortly.',
+    );
+    await deleteChannelSoon(interaction.channel);
   } catch (err) {
     console.error(err);
-    await interaction.editReply(`❌ Failed to close session: ${err.message}`.slice(0, 2000));
+    await interaction.channel.send(`❌ Failed to close session: ${err.message}`.slice(0, 2000));
   }
 }
 
-export { REPO_SELECT_ID, PUSH_BUTTON_ID, KEEP_GOING_BUTTON_ID, OPTION_BUTTON_PREFIX };
+/** Exit button from the /code close prompt — closes without committing. */
+export async function handleCloseExitButton(interaction, sessionManager) {
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (!session) {
+    await interaction.update({ content: 'This session is already closed.', components: [] });
+    return;
+  }
+
+  await interaction.update({ content: '👋 Closing without committing...', components: [] });
+  await sessionManager.close(session);
+  await interaction.channel.send('Closed — nothing was committed. This channel will be removed shortly.');
+  await deleteChannelSoon(interaction.channel);
+}
+
+export {
+  REPO_SELECT_ID,
+  COMMIT_BUTTON_ID,
+  KEEP_GOING_BUTTON_ID,
+  OPTION_BUTTON_PREFIX,
+  CLOSE_PUSH_BUTTON_ID,
+  CLOSE_EXIT_BUTTON_ID,
+};

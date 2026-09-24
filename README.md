@@ -3,9 +3,17 @@
 A Discord bot that gives you a private chat channel backed by Claude Code
 against a GitHub repo. `/code new` shows a dropdown of repos, picking one
 creates a private text channel with a fresh branch checked out, and you
-just talk to Claude in there — it edits files in that checkout. Push
-whenever you want to save progress, and `/code close` opens a pull request
-from everything pushed and cleans up the channel.
+just talk to Claude in there — it edits files in that checkout. Hit
+**Commit** whenever you want a change to go live: it commits, opens a PR,
+and immediately merges it into the default branch — which, since Coolify
+auto-deploys on push to that branch, ships it.
+
+**This means Commit has no manual review step** — clicking it puts
+Claude's changes into your default branch (and live, for anything Coolify
+deploys from it) right away. A PR is still opened and merged (so there's
+a diff on GitHub you can look back at afterward), but nothing stops you
+before the merge happens. Only give the allowed Discord role to people you
+trust to make that call.
 
 ## How it works
 
@@ -21,15 +29,22 @@ from everything pushed and cleans up the channel.
    process fed over stdin does **not** behave like a chat REPL — verified
    directly against the CLI — so this per-message-resume approach is what
    actually works.)
-4. After each reply, **Push** / **Keep Going** buttons appear:
-   - **Push** commits + pushes everything changed since the last push.
+4. After each reply, **Commit** / **Keep Going** buttons appear:
+   - **Commit** commits everything changed since the last commit, opens a
+     PR, and immediately merges it (squash) into the repo's default
+     branch. The session then re-branches off the freshly-updated default
+     branch so it can keep going and commit again later
+     ([src/sessions/manager.js](src/sessions/manager.js) `commitAndMerge`).
    - **Keep Going** just dismisses the buttons; changes stay uncommitted.
-5. `/code close` (run inside the session channel) pushes anything pending,
-   opens a GitHub PR from the branch if it has any commits, posts the link,
-   and deletes the channel a few seconds later.
-6. Idle 4 hours with no messages → any **unpushed** changes are discarded
-   and the session auto-closes the same way (PR only if something was
-   pushed earlier).
+5. If Claude offers a genuine multiple-choice decision, real Discord
+   buttons appear instead of prose — click one and it's sent back into the
+   conversation as your next message
+   ([src/sessions/reply.js](src/sessions/reply.js) `parseOptionsBlock`).
+6. `/code close` (run inside the session channel) asks **Push** (commit
+   anything pending the same way Commit does, then close) or **Exit**
+   (close without committing — pending changes are discarded).
+7. Idle 4 hours with no messages → pending changes are discarded and the
+   session auto-closes, same as Exit.
 
 Session state (channel ↔ repo ↔ branch ↔ Claude conversation id) is
 persisted to disk on the `claude-config` volume, so sessions survive a

@@ -1,8 +1,10 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 
-export const PUSH_BUTTON_ID = 'claude-session:push';
+export const COMMIT_BUTTON_ID = 'claude-session:commit';
 export const KEEP_GOING_BUTTON_ID = 'claude-session:keep-going';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
+export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
+export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
@@ -50,14 +52,29 @@ export function parseOptionsBlock(replyText) {
   return { text: text || '(see options below)', options: options.slice(0, MAX_OPTIONS) };
 }
 
-/** The Push / Keep going action row shown after each Claude reply. */
+/**
+ * The Commit / Keep Going action row shown after each Claude reply.
+ * Commit commits everything changed so far, opens a PR, and immediately
+ * merges it into the default branch (see manager.js commitAndMerge).
+ */
 export function buildPostReplyRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(PUSH_BUTTON_ID).setLabel('Push').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId(KEEP_GOING_BUTTON_ID)
       .setLabel('Keep Going')
       .setStyle(ButtonStyle.Secondary),
+  );
+}
+
+/** The Push / Exit choice shown by `/code close`. */
+export function buildClosePromptRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(CLOSE_PUSH_BUTTON_ID)
+      .setLabel('Push')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(CLOSE_EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger),
   );
 }
 

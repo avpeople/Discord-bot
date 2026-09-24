@@ -7,13 +7,17 @@ import {
   handleCodeClose,
   handleRepoSelected,
   handleSessionMessage,
-  handlePushButton,
+  handleCommitButton,
   handleKeepGoingButton,
   handleOptionButton,
+  handleClosePushButton,
+  handleCloseExitButton,
   REPO_SELECT_ID,
-  PUSH_BUTTON_ID,
+  COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
   OPTION_BUTTON_PREFIX,
+  CLOSE_PUSH_BUTTON_ID,
+  CLOSE_EXIT_BUTTON_ID,
 } from './sessions/handlers.js';
 
 const client = new Client({
@@ -53,8 +57,8 @@ client.on('interactionCreate', async (interaction) => {
       return handleRepoSelected(interaction, sessionManager);
     }
 
-    if (interaction.isButton() && interaction.customId === PUSH_BUTTON_ID) {
-      return handlePushButton(interaction, sessionManager);
+    if (interaction.isButton() && interaction.customId === COMMIT_BUTTON_ID) {
+      return handleCommitButton(interaction, sessionManager);
     }
 
     if (interaction.isButton() && interaction.customId === KEEP_GOING_BUTTON_ID) {
@@ -63,6 +67,14 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId.startsWith(OPTION_BUTTON_PREFIX)) {
       return handleOptionButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === CLOSE_PUSH_BUTTON_ID) {
+      return handleClosePushButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === CLOSE_EXIT_BUTTON_ID) {
+      return handleCloseExitButton(interaction, sessionManager);
     }
   } catch (err) {
     console.error('Unhandled interaction error:', err);

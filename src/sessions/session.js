@@ -40,6 +40,7 @@ export class Session {
     defaultBranch,
     claudeSessionId = null,
     hasPushedAnything = false,
+    commitCount = 0,
   }) {
     this.id = id;
     this.channelId = channelId;
@@ -54,6 +55,9 @@ export class Session {
     // Set after the first turn (or restored from disk on boot), used for --resume
     this.claudeSessionId = claudeSessionId;
     this.hasPushedAnything = hasPushedAnything;
+    // Incremented each time a Commit merges and the session re-branches off
+    // the default branch, so each new branch/PR gets a unique name.
+    this.commitCount = commitCount;
     this.busy = false; // true while a turn is in flight
     this.closed = false;
     this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
@@ -78,6 +82,7 @@ export class Session {
       defaultBranch: this.defaultBranch,
       claudeSessionId: this.claudeSessionId,
       hasPushedAnything: this.hasPushedAnything,
+      commitCount: this.commitCount,
     };
   }
 

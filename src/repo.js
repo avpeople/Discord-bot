@@ -68,3 +68,16 @@ export async function discardPendingChanges(git) {
   await git.reset(['--hard']);
   await git.clean('fd');
 }
+
+/**
+ * After a session branch has been merged into the default branch, moves
+ * the working directory onto a fresh branch off the now-updated default
+ * so the session can keep going and commit again later (each Commit click
+ * gets its own branch/PR rather than reusing an already-merged one, which
+ * GitHub won't accept further pushes/PRs against in the same way).
+ */
+export async function rebranchFromDefault(git, defaultBranch, newBranchName) {
+  await git.checkout(defaultBranch);
+  await git.pull('origin', defaultBranch);
+  await git.checkoutLocalBranch(newBranchName);
+}

@@ -15,6 +15,25 @@ export async function openPullRequest({ owner, repo, base, head, title, body }) 
   return data;
 }
 
+/** Merges a pull request (squash) and returns the merge result. */
+export async function mergePullRequest({ owner, repo, pullNumber }) {
+  const { data } = await octokit.rest.pulls.merge({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    merge_method: 'squash',
+  });
+  return data;
+}
+
+/** Deletes a branch on the remote (used to clean up after an auto-merge). */
+export async function deleteBranch({ owner, repo, branch }) {
+  await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` }).catch((err) => {
+    // Already gone (e.g. GitHub auto-deleted it) — not worth failing over.
+    if (err.status !== 422 && err.status !== 404) throw err;
+  });
+}
+
 /**
  * Lists repos the configured GitHub token currently has access to.
  * Works for a fine-grained PAT (the recommended setup — see README),

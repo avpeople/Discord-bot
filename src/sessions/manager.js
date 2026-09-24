@@ -1,8 +1,14 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import simpleGit from 'simple-git';
-import { prepareRepo, commitAndPush, discardPendingChanges, cleanupRepoDir } from '../repo.js';
-import { openPullRequest } from '../github.js';
+import {
+  prepareRepo,
+  commitAndPush,
+  discardPendingChanges,
+  cleanupRepoDir,
+  rebranchFromDefault,
+} from '../repo.js';
+import { openPullRequest, mergePullRequest, deleteBranch } from '../github.js';
 import { Session } from './session.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
 
@@ -101,50 +107,69 @@ export class SessionManager {
 
   /**
    * Commits + pushes everything changed in the session's working directory
-   * since the last push. Safe to call repeatedly; no-ops if nothing changed.
+   * since the last push, opens a PR, and immediately merges it into the
+   * default branch (squash) so it reaches `master`/`main` — and, via
+   * Coolify's existing auto-deploy-on-push, goes live. Returns null if
+   * there was nothing to commit.
+   *
+   * After merging, the session's working directory is moved onto a fresh
+   * branch off the now-updated default branch, so a later Commit click
+   * gets its own branch/PR rather than reusing one GitHub has already
+   * merged.
    */
-  async push(session, message) {
+  async commitAndMerge(session, message) {
     const commitMessage = message || `Claude Code session ${session.id}`;
     const { pushed } = await commitAndPush(session.git, session.branchName, commitMessage);
-    if (pushed && !session.hasPushedAnything) {
-      session.hasPushedAnything = true;
-      this._persist();
-    }
-    return pushed;
+    if (!pushed) return null;
+
+    session.hasPushedAnything = true;
+
+    const pr = await openPullRequest({
+      owner: session.owner,
+      repo: session.repo,
+      base: session.defaultBranch,
+      head: session.branchName,
+      title: commitMessage,
+      body: `Committed via an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``,
+    });
+
+    const merged = await mergePullRequest({
+      owner: session.owner,
+      repo: session.repo,
+      pullNumber: pr.number,
+    });
+
+    await deleteBranch({ owner: session.owner, repo: session.repo, branch: session.branchName });
+
+    session.commitCount += 1;
+    const nextBranch = `claude/session-${session.id}-${session.commitCount}`;
+    await rebranchFromDefault(session.git, session.defaultBranch, nextBranch);
+    session.branchName = nextBranch;
+    this._persist();
+
+    return { pr, merged };
   }
 
   /**
-   * Ends a session: if there are pushed commits on the branch, opens a PR.
-   * Uncommitted working-directory changes are left as-is until
-   * cleanupRepoDir removes the whole directory (never silently pushed).
+   * Ends a session and removes its working directory. Does NOT commit —
+   * call commitAndMerge first if you want pending changes saved; anything
+   * still uncommitted at this point is discarded along with the directory.
    */
   async close(session) {
     session.teardown();
     this.sessionsByChannel.delete(session.channelId);
     this._persist();
-
-    let pr = null;
-    if (session.hasPushedAnything) {
-      pr = await openPullRequest({
-        owner: session.owner,
-        repo: session.repo,
-        base: session.defaultBranch,
-        head: session.branchName,
-        title: `Claude Code session: ${session.repo} (${session.id})`,
-        body: `Changes made via an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``,
-      });
-    }
-
     await cleanupRepoDir(session.dir);
-    return { pr };
   }
 
   async _handleIdleExpire(session) {
-    // Idle timeout: discard anything not already pushed, then close as normal.
+    // Idle timeout: discard anything not already committed+merged (Commit
+    // merges immediately now, so there's never a dangling PR to open here),
+    // then close as normal.
     await discardPendingChanges(session.git).catch((err) => {
       console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
     });
-    const result = await this.close(session);
-    this.onIdleExpire?.(session, result);
+    await this.close(session);
+    this.onIdleExpire?.(session);
   }
 }
