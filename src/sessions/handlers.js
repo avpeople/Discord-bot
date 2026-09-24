@@ -50,46 +50,62 @@ export async function handleCodeNew(interaction) {
   }
 }
 
+/**
+ * Creates a session channel + session for a picked repo and posts the
+ * welcome message into it. Shared by the ephemeral `/code new` picker and
+ * the persistent picker channel, which differ only in how they report
+ * progress/errors back (interaction reply vs. a temporary channel message).
+ */
+export async function createSessionForRepo({ guild, user, fullName, sessionManager }) {
+  const { owner, name } = parseRepoSlug(fullName);
+  const id = sessionManager.generateSessionId();
+  const channel = await createSessionChannel({
+    guild,
+    ownerId: user.id,
+    allowedRoleId: config.discord.allowedRoleId,
+    repoFullName: fullName,
+    sessionId: id,
+  });
+
+  const session = await sessionManager.createSession({
+    id,
+    channelId: channel.id,
+    ownerId: user.id,
+    owner,
+    repo: name,
+    base: undefined,
+  });
+
+  await channel.send(
+    `👋 Session started for **${fullName}** on branch \`${session.branchName}\`.\n` +
+      `Just chat here — send a message describing what you want changed. ` +
+      `Use the **Commit** button after a reply to commit what's changed so far and merge it straight into ` +
+      `\`${session.defaultBranch}\` (a PR is opened and auto-merged, so it's still reviewable on GitHub afterward). ` +
+      `Run \`/code close\` when you're done — it'll ask whether to commit first or just exit.\n` +
+      `Idle for 4 hours with nothing committed will auto-close and discard pending changes.`,
+  );
+
+  return channel;
+}
+
 /** Repo picked from the `/code new` select menu — creates the session channel. */
 export async function handleRepoSelected(interaction, sessionManager) {
   if (!hasAccess(interaction)) return replyNoAccess(interaction);
 
   await interaction.deferUpdate();
   const fullName = interaction.values[0];
-  const { owner, name } = parseRepoSlug(fullName);
 
   try {
-    const id = sessionManager.generateSessionId();
-    const channel = await createSessionChannel({
+    const channel = await createSessionForRepo({
       guild: interaction.guild,
-      ownerId: interaction.user.id,
-      allowedRoleId: config.discord.allowedRoleId,
-      repoFullName: fullName,
-      sessionId: id,
+      user: interaction.user,
+      fullName,
+      sessionManager,
     });
-
     await interaction.editReply({
       content: `✅ Created ${channel} — cloning \`${fullName}\`...`,
       components: [buildOpenSessionRow(interaction.guildId, channel.id)],
     });
-
-    const session = await sessionManager.createSession({
-      id,
-      channelId: channel.id,
-      ownerId: interaction.user.id,
-      owner,
-      repo: name,
-      base: undefined,
-    });
-
-    await channel.send(
-      `👋 Session started for **${fullName}** on branch \`${session.branchName}\`.\n` +
-        `Just chat here — send a message describing what you want changed. ` +
-        `Use the **Commit** button after a reply to commit what's changed so far and merge it straight into ` +
-        `\`${session.defaultBranch}\` (a PR is opened and auto-merged, so it's still reviewable on GitHub afterward). ` +
-        `Run \`/code close\` when you're done — it'll ask whether to commit first or just exit.\n` +
-        `Idle for 4 hours with nothing committed will auto-close and discard pending changes.`,
-    );
   } catch (err) {
     console.error(err);
     await interaction.editReply({

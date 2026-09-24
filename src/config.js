@@ -27,6 +27,7 @@ export const config = {
   workspaceDir: process.env.WORKSPACE_DIR || '/data/workspaces',
   sessionsStatePath: process.env.SESSIONS_STATE_PATH || '/data/claude-config/discord-sessions.json',
   welcomeStatePath: process.env.WELCOME_STATE_PATH || '/data/claude-config/discord-welcome.json',
+  pickerChannelStatePath: process.env.PICKER_CHANNEL_STATE_PATH || '/data/claude-config/discord-picker-channel.json',
   // Optional: the bridge-discord control API (see the Coms server repo's
   // bridge-discord/README.md). /voice is disabled entirely if unset.
   bridgeDiscord: {

@@ -15,6 +15,14 @@ const commands = [
         .setName('close')
         .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-picker-channel')
+        .setDescription('Make a channel always show the repo picker (posts it there now)')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to use as the permanent picker').setRequired(true),
+        ),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName('welcome')

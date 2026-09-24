@@ -71,6 +71,25 @@ persisted to disk on the `claude-config` volume, so sessions survive a
 Coolify restart/redeploy — the bot reloads them on boot and posts a notice
 in each still-open channel.
 
+## Persistent picker channel (optional)
+
+`/code set-picker-channel channel:#code` (requires **Manage Channels**)
+designates a channel that always shows the repo picker — open it and
+there's just a dropdown waiting, no need to run `/code new` each time.
+
+- Picking a repo there works the same as `/code new` (same access check,
+  same session creation), but the confirmation — who started a session and
+  a link to it — replaces the picker message for ~10 seconds, then it
+  reverts back to the plain picker automatically
+  ([src/sessions/picker-channel-handlers.js](src/sessions/picker-channel-handlers.js)).
+- Anyone with `ALLOWED_ROLE_ID` can use it, same as the ephemeral picker.
+- The channel/message ids are persisted (same pattern as session state),
+  and the bot re-syncs the message back to the plain picker on boot in
+  case it restarted mid-confirmation-window.
+- Only one picker channel per server. Running the command again in a
+  different channel moves it there; the old channel keeps whatever its
+  last message was (nothing un-sets it automatically).
+
 ## Welcome panel (role requests)
 
 Separate from the Claude Code sessions: `/welcome` manages a self-serve

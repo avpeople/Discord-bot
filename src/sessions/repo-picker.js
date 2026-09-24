@@ -2,14 +2,21 @@ import { ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
 import { listAccessibleRepos } from '../github.js';
 
 export const REPO_SELECT_ID = 'claude-session:repo-select';
+// Distinct id for the persistent picker channel's select menu (see
+// channel-picker.js) — a different customId lets index.js route the two
+// flows differently (ephemeral one-off reply vs. an always-visible message
+// that repost itself after each pick).
+export const PERSISTENT_REPO_SELECT_ID = 'claude-session:repo-select-persistent';
 
 /**
- * Builds the reply for `/code new`: a dropdown of repos the GitHub token
- * can access. Discord select menus cap at 25 options, so beyond that we
- * just show the first 25 and tell the user to narrow their token's repo
- * list if they need one further down.
+ * Builds the repo-picker message content: a dropdown of repos the GitHub
+ * token can access. Discord select menus cap at 25 options, so beyond that
+ * we just show the first 25 and tell the user to narrow their token's repo
+ * list if they need one further down. `selectId` lets callers choose which
+ * customId the menu uses (ephemeral `/code new` vs. the persistent picker
+ * channel), since the resulting interaction needs to be routed differently.
  */
-export async function buildRepoPickerReply() {
+export async function buildRepoPickerReply(selectId = REPO_SELECT_ID) {
   const repos = await listAccessibleRepos();
 
   if (repos.length === 0) {
@@ -22,7 +29,7 @@ export async function buildRepoPickerReply() {
 
   const shown = repos.slice(0, 25);
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(REPO_SELECT_ID)
+    .setCustomId(selectId)
     .setPlaceholder('Choose a repo to start a Claude Code session')
     .addOptions(
       shown.map((r) => ({

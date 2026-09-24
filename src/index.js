@@ -38,6 +38,12 @@ import {
   isDenyButton,
 } from './welcome/handlers.js';
 import { handleVoiceJoin, handleVoiceLeave, handleVoiceStatus } from './voice/handlers.js';
+import {
+  handleSetPickerChannel,
+  handlePersistentRepoSelected,
+  resyncPickerChannel,
+} from './sessions/picker-channel-handlers.js';
+import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -61,6 +67,13 @@ client.once('ready', async () => {
         .catch((err) => console.error('Failed to post restore notice:', err));
     }
   }
+
+  // Reset any picker channel back to the plain picker in case the bot
+  // restarted mid-confirmation-window (e.g. right after someone picked a
+  // repo, before the 10s revert fired).
+  for (const guild of client.guilds.cache.values()) {
+    await resyncPickerChannel(client, guild.id);
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -69,6 +82,7 @@ client.on('interactionCreate', async (interaction) => {
       const sub = interaction.options.getSubcommand();
       if (sub === 'new') return handleCodeNew(interaction);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
+      if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
       return;
     }
 
@@ -103,6 +117,10 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isStringSelectMenu() && interaction.customId === REPO_SELECT_ID) {
       return handleRepoSelected(interaction, sessionManager);
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === PERSISTENT_REPO_SELECT_ID) {
+      return handlePersistentRepoSelected(interaction, sessionManager);
     }
 
     if (interaction.isButton() && interaction.customId === COMMIT_BUTTON_ID) {
