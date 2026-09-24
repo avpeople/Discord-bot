@@ -18,8 +18,8 @@ Use at most 5 options (A-E), keep each option label short (under 60 characters �
 
 If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
 
-IMPORTANT — Bash tool policy, overrides any other instinct you have about unavailable tools: the Bash tool IS present in your tool list and IS worth calling. It is currently denied by a permission setting, not absent — this is different from a tool that genuinely doesn't exist. Denial is not something you can predict or reason about in advance; it is only revealed by actually attempting the call, and doing so is exactly what shows the user a real Approve/Deny button in Discord letting them unlock it for you on the spot. This is a live mechanism the user relies on, and it only works if you call the tool.
-So: whenever a task would benefit from a shell command (npm/build tools, running tests, git operations beyond what your other tools cover, checking a command's output, anything), call Bash for it FIRST, before writing any explanation. Do not write "Bash isn't available" or "there's no approval-prompt fallback" or similar — you cannot know that without trying, and telling the user this is simply incorrect if you haven't tried. Only mention Bash being unavailable, and only after, an actual tool_use call to Bash in this same turn was denied AND the user then declined the resulting approval prompt.`;
+IMPORTANT — Bash tool policy, overrides any other instinct you have about unavailable tools: Bash is currently switched off by a permission setting in this environment, not something that was never built — attempting to call it is exactly what shows the user a real Approve/Deny button in Discord letting them switch it on for you on the spot, for that one attempt. This is a live mechanism the user relies on, and it only works if you actually call the tool rather than reasoning in advance that it won't work.
+So: whenever a task would benefit from a shell command (npm/build tools, running tests, git operations beyond what your other tools cover, checking a command's output, anything), call Bash for it FIRST, before writing any explanation — even if it isn't listed among your available tools, or a prior attempt in this same conversation failed. Do not write "Bash isn't available" or "there's no approval-prompt fallback" or similar before trying — that's not something you can know in advance, and saying it without trying is simply incorrect. Only mention Bash being unavailable after an actual attempt in this same turn failed AND the user then declined the resulting approval prompt.`;
 
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
@@ -95,10 +95,12 @@ export class Session {
   /**
    * Sends one user turn to Claude Code and resolves with
    * `{ result, permissionDenials }` — `result` is the final `result`
-   * event, `permissionDenials` is every `permission_denied` event seen
-   * during the turn (usually empty; see handlers.js for how the bot turns
-   * a non-empty list into an Approve/Deny prompt). `onEvent` is called for
-   * every streamed event (assistant tool-use, etc.) so the caller can show
+   * event, `permissionDenials` is every denied Bash attempt seen during
+   * the turn (usually empty; see handlers.js for how the bot turns a
+   * non-empty list into an Approve/Deny prompt). Detected by matching the
+   * denied tool_result's error text, not a dedicated system event — see
+   * the detection code below for why. `onEvent` is called for every
+   * streamed event (assistant tool-use, etc.) so the caller can show
    * progress.
    *
    * `allowBash: true` is used for a one-time re-run after the user
@@ -180,24 +182,28 @@ export class Session {
             this._onChange?.(this);
           }
           if (event.type === 'result') lastResult = event;
-          if (event.type === 'system' && event.subtype === 'permission_denied') {
-            permissionDenials.push({ toolName: event.tool_name, message: event.message });
-          }
-          // TEMP DIAGNOSTIC (see git history / remove once the container's
-          // actual denial event shape for Bash is confirmed): log anything
-          // that looks like an error response to a Bash call, since the
-          // permission_denied shape was only verified against a Windows dev
-          // box where Claude used a PowerShell fallback tool, never against
-          // a real Bash-only denial in this container.
+          // Verified directly against the real production container (CLI
+          // 2.1.197 — a different version/build than a Windows dev machine's
+          // native install, which instead emits a `system`/`permission_denied`
+          // event that this container never does): a disallowed Bash call
+          // comes back as a plain `tool_result` with `is_error: true` and a
+          // content string like "Error: No such tool available: Bash. Bash
+          // exists but is not enabled in this context." — not a dedicated
+          // system event at all. `--disallowedTools Bash` removes Bash from
+          // the exposed tool list entirely on this version rather than
+          // exposing-but-denying it, so Claude sees it as absent, and this is
+          // the only place that shows up.
           if (event.type === 'user' && Array.isArray(event.message?.content)) {
             for (const block of event.message.content) {
-              if (block.type === 'tool_result' && block.is_error) {
-                console.error('[diag] error tool_result:', JSON.stringify(block).slice(0, 2000));
+              if (
+                block.type === 'tool_result' &&
+                block.is_error &&
+                typeof block.content === 'string' &&
+                /no such tool available: bash/i.test(block.content)
+              ) {
+                permissionDenials.push({ toolName: 'Bash', message: block.content });
               }
             }
-          }
-          if (event.type === 'system') {
-            console.error('[diag] system event:', JSON.stringify(event).slice(0, 2000));
           }
           onEvent?.(event);
         }

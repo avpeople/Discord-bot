@@ -145,11 +145,13 @@ async function runTurn(session, channel, text, sessionManager, { allowBash = fal
     // A denial takes priority over the options/normal-reply row — Claude's
     // reply text in this case is almost always just "I can't do that",
     // not a real answer, so the actionable thing is the approval prompt.
+    // Note: the real denial (see session.js) doesn't carry the specific
+    // command Claude wanted to run, only "Bash isn't enabled" — so this
+    // can't show the exact command, just that Bash was needed.
     if (permissionDenials.length > 0) {
       session.pendingApprovalText = text;
-      const commands = permissionDenials.map((d) => `\`${d.message || d.toolName}\``).join('\n');
       await channel.send({
-        content: `🔒 Claude wants to run something that isn't allowed by default:\n${commands}\n\nApprove it for this one attempt?`,
+        content: '🔒 Claude wants to use a shell command (Bash), which is disabled by default.\n\nApprove it for this one attempt?',
         components: [buildBashApprovalRow()],
       });
       return;
