@@ -183,6 +183,22 @@ export class Session {
           if (event.type === 'system' && event.subtype === 'permission_denied') {
             permissionDenials.push({ toolName: event.tool_name, message: event.message });
           }
+          // TEMP DIAGNOSTIC (see git history / remove once the container's
+          // actual denial event shape for Bash is confirmed): log anything
+          // that looks like an error response to a Bash call, since the
+          // permission_denied shape was only verified against a Windows dev
+          // box where Claude used a PowerShell fallback tool, never against
+          // a real Bash-only denial in this container.
+          if (event.type === 'user' && Array.isArray(event.message?.content)) {
+            for (const block of event.message.content) {
+              if (block.type === 'tool_result' && block.is_error) {
+                console.error('[diag] error tool_result:', JSON.stringify(block).slice(0, 2000));
+              }
+            }
+          }
+          if (event.type === 'system') {
+            console.error('[diag] system event:', JSON.stringify(event).slice(0, 2000));
+          }
           onEvent?.(event);
         }
       });
