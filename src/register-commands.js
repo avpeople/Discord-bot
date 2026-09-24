@@ -116,6 +116,18 @@ const commands = [
         ),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName('studio')
+    .setDescription('Studio monitoring (GFX site logins, and future studio systems)')
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-log-channel')
+        .setDescription('Set where studio monitoring events (e.g. GFX site logins) get logged')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to log studio events to').setRequired(true),
+        ),
+    )
+    .toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

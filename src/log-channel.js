@@ -8,14 +8,16 @@ export function initLogChannel(discordClient) {
 }
 
 /**
- * Sends one line to the guild's configured audit log channel, if any.
- * Silently no-ops if no log channel is set, the channel/guild can't be
+ * Sends one line to the guild's configured log channel for `kind`
+ * ('activity' for Claude Code session events, 'studio' for GFX/studio
+ * monitoring events, etc. — see log-channel-store.js). Silently no-ops if
+ * no log channel is set for that kind, the channel/guild can't be
  * fetched, or the bot lacks permission — logging is best-effort and must
  * never be the reason a real user-facing action fails.
  */
-export async function logEvent(guildId, message) {
+export async function logEvent(guildId, message, kind = 'activity') {
   if (!client || !guildId) return;
-  const channelId = getLogChannel(guildId);
+  const channelId = getLogChannel(guildId, kind);
   if (!channelId) return;
 
   try {

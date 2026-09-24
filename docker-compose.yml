@@ -4,6 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    ports:
+      # Only actually listens if NOTIFY_API_KEY is set (see src/notify-server.js) —
+      # harmless to publish otherwise, the port just won't be open inside the container.
+      - "${NOTIFY_PORT:-8790}:${NOTIFY_PORT:-8790}"
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
@@ -15,6 +19,14 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       CLAUDE_CONFIG_DIR: /data/claude-config
       WORKSPACE_DIR: /data/workspaces
+      # Voice bridge (optional) — was missing from this file entirely before,
+      # so setting these in Coolify's UI alone never actually reached the
+      # container (Coolify only passes through what's referenced here).
+      BRIDGE_DISCORD_URL: ${BRIDGE_DISCORD_URL}
+      BRIDGE_DISCORD_API_KEY: ${BRIDGE_DISCORD_API_KEY}
+      # Inbound notify endpoint (optional) — see .env.example
+      NOTIFY_API_KEY: ${NOTIFY_API_KEY}
+      NOTIFY_PORT: ${NOTIFY_PORT:-8790}
     volumes:
       - claude-config:/data/claude-config
       - workspaces:/data/workspaces

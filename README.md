@@ -109,6 +109,38 @@ does nothing rather than ever failing the real action it's logging.
 Config is per-guild, persisted the same way as the picker channel and
 welcome panel config.
 
+## Studio monitoring (optional)
+
+`/studio set-log-channel channel:#studio-events` (requires **Manage
+Channels**) sets where studio/GFX monitoring events get logged — a
+separate channel from the Claude Code activity log above, since these
+come from different systems entirely.
+
+Events reach Discord via an inbound HTTP endpoint external services call
+directly — the bot doesn't poll anything. See
+[src/notify-server.js](src/notify-server.js):
+
+- `POST /notify` with header `x-api-key: <NOTIFY_API_KEY>` and body
+  `{ "message": "...", "guildId": "...", "kind": "studio" }` — `guildId`
+  defaults to `DISCORD_GUILD_ID` if omitted, `kind` defaults to `"studio"`.
+- Entirely disabled (no port opened) unless `NOTIFY_API_KEY` is set —
+  opt-in, inert by default.
+- The port is public (not on an internal Docker network with whatever's
+  calling it — see the commit history for why: each Coolify app gets its
+  own isolated network by default, and joining a shared one was more
+  infra work than this needed for a first version), so the API key is the
+  only thing gating it — pick a long random value.
+
+The Sports GFX site (`Websites/Sports Gfx`) is the first caller: its
+login route (`app/api/auth/login/route.ts`) fire-and-forgets a call to
+this endpoint via `lib/discord-notify.ts` on every successful login,
+configured with `DISCORD_NOTIFY_URL` / `DISCORD_NOTIFY_API_KEY` in that
+repo's own env. Any other studio system can call the same endpoint the
+same way — that's why `kind` exists, so future sources don't need new
+storage/command plumbing on this side, just `/studio set-log-channel`
+(or a new command, if a source ever wants its own channel rather than
+sharing the `studio` one).
+
 ## Welcome panel (role requests)
 
 Separate from the Claude Code sessions: `/welcome` manages a self-serve

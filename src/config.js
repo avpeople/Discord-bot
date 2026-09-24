@@ -35,4 +35,11 @@ export const config = {
     url: process.env.BRIDGE_DISCORD_URL || null,
     apiKey: process.env.BRIDGE_DISCORD_API_KEY || null,
   },
+  // Optional: inbound HTTP endpoint external services (e.g. the Sports
+  // GFX site) call to post a studio-monitoring log line. Disabled
+  // entirely if NOTIFY_API_KEY is unset — no port is opened.
+  notify: {
+    port: Number(process.env.NOTIFY_PORT) || 8790,
+    apiKey: process.env.NOTIFY_API_KEY || null,
+  },
 };

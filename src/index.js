@@ -44,8 +44,9 @@ import {
   resyncPickerChannel,
 } from './sessions/picker-channel-handlers.js';
 import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
-import { handleSetLogChannel } from './log-channel-handlers.js';
+import { handleSetLogChannel, handleSetStudioLogChannel } from './log-channel-handlers.js';
 import { initLogChannel } from './log-channel.js';
+import { startNotifyServer } from './notify-server.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -57,6 +58,7 @@ const sessionManager = new SessionManager();
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   initLogChannel(client);
+  startNotifyServer();
 
   const restored = sessionManager.restore();
   if (restored.length > 0) {
@@ -104,6 +106,12 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'join') return handleVoiceJoin(interaction);
       if (sub === 'leave') return handleVoiceLeave(interaction);
       if (sub === 'status') return handleVoiceStatus(interaction);
+      return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'studio') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'set-log-channel') return handleSetStudioLogChannel(interaction);
       return;
     }
 
