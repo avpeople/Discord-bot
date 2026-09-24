@@ -1,0 +1,20 @@
+{
+  "name": "claude-code-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that runs Claude Code headlessly against GitHub repos and opens PRs",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "simple-git": "^3.27.0",
+    "octokit": "^4.0.2",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
