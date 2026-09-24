@@ -50,7 +50,10 @@ const commands = [
           opt.setName('channel').setDescription('Where to post the panel').setRequired(true),
         )
         .addStringOption((opt) =>
-          opt.setName('message').setDescription('Custom panel text (optional)').setRequired(false),
+          opt.setName('title').setDescription('Embed title (optional, defaults to "Welcome to <server>!")').setRequired(false),
+        )
+        .addStringOption((opt) =>
+          opt.setName('description').setDescription('Embed description (optional)').setRequired(false),
         ),
     )
     .toJSON(),

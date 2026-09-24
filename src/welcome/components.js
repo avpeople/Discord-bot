@@ -1,8 +1,11 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 
 const REQUEST_PREFIX = 'welcome:request:';
 const APPROVE_PREFIX = 'welcome:approve:';
 const DENY_PREFIX = 'welcome:deny:';
+
+// Discord blurple — matches the bot's own accent color for a consistent look.
+const WELCOME_EMBED_COLOR = 0x5865f2;
 
 export function isRequestButton(customId) {
   return customId.startsWith(REQUEST_PREFIX);
@@ -26,6 +29,22 @@ export function roleIdFromRequestButton(customId) {
 export function decodeDecisionButton(customId, prefix) {
   const [roleId, userId] = customId.slice(prefix.length).split(':');
   return { roleId, userId };
+}
+
+/**
+ * The welcome panel's embed: a bordered box with a title, description and
+ * accent color, listing the requestable roles — a proper "welcome" look
+ * rather than a plain text line above the buttons.
+ */
+export function buildWelcomeEmbed({ title, description, roles, guildName, iconURL }) {
+  const roleList = roles.map((r) => `• **${r.label}**`).join('\n');
+  return new EmbedBuilder()
+    .setColor(WELCOME_EMBED_COLOR)
+    .setTitle(title || `👋 Welcome to ${guildName}!`)
+    .setDescription(
+      `${description || 'Pick a role below to get started. An admin will review your request shortly.'}\n\n${roleList}`,
+    )
+    .setThumbnail(iconURL || null);
 }
 
 /**

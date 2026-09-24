@@ -74,9 +74,11 @@ manually assigning it.
 - `/welcome remove-role role:@Dev` — removes one.
 - `/welcome set-approval-channel channel:#role-requests` — where requests
   get posted with Approve/Deny buttons.
-- `/welcome post channel:#welcome message:"..."` — posts (or re-posts) the
-  panel. Run it again after adding/removing roles to refresh an existing
-  panel's buttons.
+- `/welcome post channel:#welcome title:"..." description:"..."` — posts
+  (or re-posts) the panel as a bordered embed listing the requestable
+  roles, with buttons below. Title/description are optional (default to
+  "Welcome to \<server\>!" and a generic prompt). Run it again after
+  adding/removing roles to refresh an existing panel.
 
 All four require the **Manage Roles** Discord permission — separate from
 `ALLOWED_ROLE_ID`, which only gates Claude Code session access.

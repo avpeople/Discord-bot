@@ -1,6 +1,7 @@
 import { MessageFlags, PermissionsBitField } from 'discord.js';
 import { getGuildConfig, addRole, removeRole, setApprovalChannel } from './store.js';
 import {
+  buildWelcomeEmbed,
   buildWelcomePanelRows,
   buildApprovalRow,
   isRequestButton,
@@ -87,11 +88,15 @@ export async function handleWelcomePost(interaction) {
     return;
   }
 
-  const message =
-    interaction.options.getString('message') ||
-    "👋 **Welcome!**\nClick a button below to request a role. An admin will review it shortly.";
+  const embed = buildWelcomeEmbed({
+    title: interaction.options.getString('title'),
+    description: interaction.options.getString('description'),
+    roles,
+    guildName: interaction.guild.name,
+    iconURL: interaction.guild.iconURL({ size: 256 }),
+  });
 
-  await channel.send({ content: message, components: buildWelcomePanelRows(roles) });
+  await channel.send({ embeds: [embed], components: buildWelcomePanelRows(roles) });
   await interaction.reply({ content: `✅ Posted the welcome panel in ${channel}.`, flags: MessageFlags.Ephemeral });
 }
 
