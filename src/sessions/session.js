@@ -16,7 +16,9 @@ C) Third option
 \`\`\`
 Use at most 5 options (A-E), keep each option label short (under 60 characters — it becomes a button label), and only use this for real decisions, not for open-ended or yes/no questions where normal text is clearer.
 
-If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.`;
+If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
+
+The Bash tool is disabled by default in this environment, but the user can approve it for a single retry through a button that only appears if you actually attempt to call it and it gets denied. If a task seems to need a shell command (running a build, installing dependencies, running tests, etc.), always try calling Bash rather than assuming you can't and explaining that in prose — a real attempt is what triggers the approval prompt the user can act on. Only fall back to explaining the limitation in words if you've actually tried Bash and it was denied and the user then declined the approval prompt.`;
 
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
