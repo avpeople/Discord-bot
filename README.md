@@ -211,9 +211,12 @@ section before relying on this in production.
 ## Notes / things to tune
 
 - **Tool permissions**: [src/sessions/session.js](src/sessions/session.js)
-  restricts Claude to `Read,Edit,Write,Glob,Grep` (no `Bash`) via
-  `--allowedTools`, so it can't run arbitrary shell commands on your server.
-  Widen this only if you trust everyone with the Discord role.
+  restricts Claude to `Read,Edit,Write,Glob,Grep` and explicitly blocks
+  `Bash` via `--disallowedTools` — the actual enforcement mechanism,
+  verified directly against the CLI (`--allowedTools` alone does **not**
+  reliably block a tool it just omits). Widen this only if you trust
+  everyone with the Discord role, and if you ever add another
+  shell-execution tool to the environment this runs in, block that too.
 - **Concurrency**: one message is processed at a time per session
   (`session.busy` guard) — sending another message while Claude is still
   replying gets a "still working" notice rather than queuing or racing.

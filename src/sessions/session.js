@@ -110,6 +110,21 @@ export class Session {
       '--verbose',
       '--permission-mode', 'acceptEdits',
       '--allowedTools', 'Read,Edit,Write,Glob,Grep',
+      // --allowedTools alone does NOT reliably block a tool it omits — verified
+      // directly against the CLI: with only --allowedTools set (no
+      // --disallowedTools), Claude ran Bash anyway despite it being absent from
+      // the allow list. --disallowedTools is the actual enforcement mechanism
+      // (confirmed: the first Bash call in a clean test was denied with a real
+      // permission_denied event, no workaround). Keep both — --allowedTools
+      // documents intent, --disallowedTools is what actually stops it. Note:
+      // this was verified on a dev machine whose Claude Code install also
+      // exposes a PowerShell tool, which Claude used as a workaround once when
+      // explicitly told "use whatever shell tool you have" — the production
+      // container (npm-installed CLI on node:20-slim) has no such alternative
+      // shell tool, so Bash is the only one to block there, but if this bot is
+      // ever run somewhere with another shell-execution tool available, that
+      // needs adding here too.
+      '--disallowedTools', 'Bash',
       '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
     ];
     if (this.claudeSessionId) {
