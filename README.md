@@ -28,7 +28,10 @@ trust to make that call.
    conversation, so it feels continuous. (A single long-running `claude`
    process fed over stdin does **not** behave like a chat REPL — verified
    directly against the CLI — so this per-message-resume approach is what
-   actually works.)
+   actually works.) Attach an image (e.g. a screenshot of a bug) and it's
+   downloaded to a folder *outside* the repo checkout — never committed —
+   and referenced by path in the prompt so Claude can read it
+   ([src/sessions/attachments.js](src/sessions/attachments.js)).
 4. After each reply, **Commit** / **Keep Going** buttons appear:
    - **Commit** commits everything changed since the last commit, opens a
      PR, and immediately merges it (squash) into the repo's default
@@ -149,3 +152,7 @@ picks it up automatically and skips subscription auth.
 - **Repo directories**: each session gets its own clone under
   `WORKSPACE_DIR/<owner>/<repo>/<session-id>/`, deleted when the session
   closes — concurrent sessions on the same repo never collide.
+- **Image attachments**: only `image/png`, `image/jpeg`, `image/webp`,
+  `image/gif` up to 15MB are picked up (see `IMAGE_CONTENT_TYPES` /
+  `MAX_IMAGE_BYTES` in [src/sessions/attachments.js](src/sessions/attachments.js));
+  other attachment types are silently ignored for now.

@@ -11,6 +11,7 @@ import {
 import { openPullRequest, mergePullRequest, deleteBranch } from '../github.js';
 import { Session } from './session.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
+import { cleanupUploadsDir } from './attachments.js';
 
 /**
  * Tracks all active per-channel Claude Code chat sessions and owns their
@@ -160,6 +161,7 @@ export class SessionManager {
     this.sessionsByChannel.delete(session.channelId);
     this._persist();
     await cleanupRepoDir(session.dir);
+    await cleanupUploadsDir(session.dir);
   }
 
   async _handleIdleExpire(session) {

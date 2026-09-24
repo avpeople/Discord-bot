@@ -15,6 +15,7 @@ import {
   CLOSE_EXIT_BUTTON_ID,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
+import { downloadImageAttachments } from './attachments.js';
 
 export function hasAccess(interaction) {
   const member = interaction.member;
@@ -161,7 +162,21 @@ export async function handleSessionMessage(message, sessionManager) {
     return;
   }
 
-  await runTurn(session, message.channel, message.content, sessionManager);
+  let text = message.content;
+  if (message.attachments.size > 0) {
+    try {
+      const imagePaths = await downloadImageAttachments(message, session.dir);
+      if (imagePaths.length > 0) {
+        const refs = imagePaths.map((p) => `- ${p}`).join('\n');
+        text = `${text}\n\n[Attached image${imagePaths.length > 1 ? 's' : ''}, read with the Read tool:]\n${refs}`;
+      }
+    } catch (err) {
+      console.error('Failed to download attachment(s):', err);
+      await message.reply(`⚠️ Couldn't download an attachment: ${err.message}`);
+    }
+  }
+
+  await runTurn(session, message.channel, text, sessionManager);
 }
 
 /** Commit button on a reply — commits, opens a PR, and merges it into the default branch. */
