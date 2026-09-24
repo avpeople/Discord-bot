@@ -54,6 +54,23 @@ export function parseOptionsBlock(replyText) {
 }
 
 /**
+ * A Link-style "Open Session" button pointing straight at the new
+ * channel. Discord has no API for a bot to force-navigate a user's
+ * client to a channel — this is the closest equivalent: a one-tap jump
+ * link, more prominent than the inline channel mention already in the
+ * confirmation text. Link buttons need no customId/handler; Discord
+ * opens the URL client-side.
+ */
+export function buildOpenSessionRow(guildId, channelId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('Open Session')
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://discord.com/channels/${guildId}/${channelId}`),
+  );
+}
+
+/**
  * The Commit / Keep Going / Exit action row shown after each Claude reply.
  * Commit commits everything changed so far, opens a PR, and immediately
  * merges it into the default branch (see manager.js commitAndMerge).

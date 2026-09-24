@@ -6,6 +6,7 @@ import {
   buildPostReplyRow,
   buildOptionsRows,
   buildClosePromptRow,
+  buildOpenSessionRow,
   chunkMessage,
   parseOptionsBlock,
   COMMIT_BUTTON_ID,
@@ -66,7 +67,7 @@ export async function handleRepoSelected(interaction, sessionManager) {
 
     await interaction.editReply({
       content: `✅ Created ${channel} — cloning \`${fullName}\`...`,
-      components: [],
+      components: [buildOpenSessionRow(interaction.guildId, channel.id)],
     });
 
     const session = await sessionManager.createSession({
