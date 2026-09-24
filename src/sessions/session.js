@@ -3,6 +3,19 @@ import { config } from '../config.js';
 
 const IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
+// Instructs Claude to offer clickable Discord buttons for genuine
+// multiple-choice decisions, instead of just asking in prose. The bot
+// parses this fenced block back out of the reply (see reply.js
+// parseOptionsBlock) and renders real buttons from it.
+const OPTIONS_SYSTEM_PROMPT = `You are chatting with a user through a Discord bot that can render clickable buttons for multiple-choice questions.
+When you need the user to pick between a small number of concrete options (not open-ended questions), end your reply with a fenced block like this, on its own lines:
+\`\`\`options
+A) First option
+B) Second option
+C) Third option
+\`\`\`
+Use at most 5 options (A-E), keep each option label short (under 60 characters — it becomes a button label), and only use this for real decisions, not for open-ended or yes/no questions where normal text is clearer.`;
+
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
  * branch directory. There is no single long-lived `claude` process —
@@ -43,6 +56,7 @@ export class Session {
     this.hasPushedAnything = hasPushedAnything;
     this.busy = false; // true while a turn is in flight
     this.closed = false;
+    this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
 
     this._idleTimer = null;
     this._onIdleExpire = null; // set by SessionManager
@@ -91,6 +105,7 @@ export class Session {
       '--verbose',
       '--permission-mode', 'acceptEdits',
       '--allowedTools', 'Read,Edit,Write,Glob,Grep',
+      '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
     ];
     if (this.claudeSessionId) {
       args.push('--resume', this.claudeSessionId);

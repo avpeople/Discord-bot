@@ -9,9 +9,11 @@ import {
   handleSessionMessage,
   handlePushButton,
   handleKeepGoingButton,
+  handleOptionButton,
   REPO_SELECT_ID,
   PUSH_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
+  OPTION_BUTTON_PREFIX,
 } from './sessions/handlers.js';
 
 const client = new Client({
@@ -57,6 +59,10 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === KEEP_GOING_BUTTON_ID) {
       return handleKeepGoingButton(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(OPTION_BUTTON_PREFIX)) {
+      return handleOptionButton(interaction, sessionManager);
     }
   } catch (err) {
     console.error('Unhandled interaction error:', err);
