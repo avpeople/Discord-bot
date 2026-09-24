@@ -13,6 +13,8 @@ import {
   handleOptionButton,
   handleClosePushButton,
   handleCloseExitButton,
+  handleApproveBashButton,
+  handleDenyBashButton,
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
@@ -20,6 +22,8 @@ import {
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
+  APPROVE_BASH_BUTTON_ID,
+  DENY_BASH_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -123,6 +127,14 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === CLOSE_EXIT_BUTTON_ID) {
       return handleCloseExitButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === APPROVE_BASH_BUTTON_ID) {
+      return handleApproveBashButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === DENY_BASH_BUTTON_ID) {
+      return handleDenyBashButton(interaction, sessionManager);
     }
   } catch (err) {
     console.error('Unhandled interaction error:', err);

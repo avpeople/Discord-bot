@@ -50,11 +50,20 @@ trust to make that call.
    buttons appear instead of prose — click one and it's sent back into the
    conversation as your next message
    ([src/sessions/reply.js](src/sessions/reply.js) `parseOptionsBlock`).
-   An Exit button is included alongside the options.
-6. `/code close` (run inside the session channel) asks **Push** (commit
+   An Exit button is included alongside the options. If Claude has several
+   distinct questions to ask, it's instructed to ask them one at a time
+   rather than listing them all in one reply — see `OPTIONS_SYSTEM_PROMPT`
+   in [src/sessions/session.js](src/sessions/session.js).
+6. Bash is blocked by default (see "Tool permissions" below) — if Claude
+   wants to run something that needs it, the bot shows an **Approve** /
+   **Deny** prompt with what it wanted to run instead of just letting the
+   turn fail silently. Approve re-sends the same message with Bash allowed
+   for that one attempt; Deny leaves Claude's "I can't do that" as the
+   final answer.
+7. `/code close` (run inside the session channel) asks **Push** (commit
    anything pending the same way Commit does, then close) or **Exit**
    (close without committing — pending changes are discarded).
-7. Idle 4 hours with no messages → pending changes are discarded and the
+8. Idle 4 hours with no messages → pending changes are discarded and the
    session auto-closes, same as Exit.
 
 Session state (channel ↔ repo ↔ branch ↔ Claude conversation id) is
@@ -217,6 +226,17 @@ section before relying on this in production.
   reliably block a tool it just omits). Widen this only if you trust
   everyone with the Discord role, and if you ever add another
   shell-execution tool to the environment this runs in, block that too.
+- **Bash approval scope**: clicking Approve on a Bash-denial prompt
+  unlocks Bash entirely for that one re-run (`--allowedTools` including
+  `Bash`, no `--disallowedTools`), not just the specific command Claude
+  wanted to run — scoping to the exact command via Claude Code's
+  `Bash(<command>)` allow-list syntax couldn't be cleanly verified against
+  this bot's actual environment (see the commit history around the
+  Approve/Deny feature for why), so the simpler, verified-working version
+  shipped instead. Since the conversation resumes right where it left off,
+  Claude will almost always just run the same command it originally asked
+  for — but the guardrail is "Bash is on for this turn," not "only this
+  exact command."
 - **Concurrency**: one message is processed at a time per session
   (`session.busy` guard) — sending another message while Claude is still
   replying gets a "still working" notice rather than queuing or racing.

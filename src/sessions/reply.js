@@ -6,6 +6,8 @@ export const EXIT_BUTTON_ID = 'claude-session:exit';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
 export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
 export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
+export const APPROVE_BASH_BUTTON_ID = 'claude-session:approve-bash';
+export const DENY_BASH_BUTTON_ID = 'claude-session:deny-bash';
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
@@ -101,6 +103,21 @@ export function buildPostReplyRow({ used } = {}) {
 
   row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
   return row;
+}
+
+/**
+ * The Approve / Deny row shown when Claude's turn was denied a tool
+ * (currently always Bash — see session.js). Approve re-sends the same
+ * message with Bash allowed for that one re-run; Deny leaves Claude's
+ * "I can't do that" response as the final answer. No Exit button here —
+ * closing mid-approval isn't a case worth a dedicated button, /code close
+ * or an Exit on an earlier message still works.
+ */
+export function buildBashApprovalRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(APPROVE_BASH_BUTTON_ID).setLabel('Approve').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(DENY_BASH_BUTTON_ID).setLabel('Deny').setStyle(ButtonStyle.Danger),
+  );
 }
 
 /** The Push / Exit choice shown by `/code close`. */

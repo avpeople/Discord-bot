@@ -7,6 +7,7 @@ import {
   buildOptionsRows,
   buildClosePromptRow,
   buildOpenSessionRow,
+  buildBashApprovalRow,
   chunkMessage,
   parseOptionsBlock,
   COMMIT_BUTTON_ID,
@@ -15,6 +16,8 @@ import {
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
+  APPROVE_BASH_BUTTON_ID,
+  DENY_BASH_BUTTON_ID,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 import { downloadImageAttachments } from './attachments.js';
@@ -98,16 +101,20 @@ export async function handleRepoSelected(interaction, sessionManager) {
 
 /**
  * Sends `text` as the next turn in `session` and posts the reply into
- * `channel`, including Commit/Keep Going buttons or option buttons if
- * Claude's reply ended with a ```options block. Shared by plain messages
- * and option-button clicks so both go through identical handling.
+ * `channel`, including Commit/Keep Going/Exit buttons, option buttons if
+ * Claude's reply ended with a ```options block, or an Approve/Deny prompt
+ * if Claude was denied a tool (currently always Bash — see session.js).
+ * Shared by plain messages, option-button clicks, and Bash approval
+ * re-runs so all three go through identical handling. `allowBash: true`
+ * is passed through for the one-time re-run after an approval.
  */
-async function runTurn(session, channel, text, sessionManager) {
+async function runTurn(session, channel, text, sessionManager, { allowBash = false } = {}) {
   const thinking = await channel.send('🤔 Thinking...');
   let toolCallCount = 0;
 
   try {
-    const result = await sessionManager.sendMessage(session, text, {
+    const { result, permissionDenials } = await sessionManager.sendMessage(session, text, {
+      allowBash,
       onEvent: (event) => {
         if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
           for (const block of event.message.content) {
@@ -133,6 +140,19 @@ async function runTurn(session, channel, text, sessionManager) {
     await thinking.edit(chunks[0]);
     for (const extra of chunks.slice(1)) {
       await channel.send(extra);
+    }
+
+    // A denial takes priority over the options/normal-reply row — Claude's
+    // reply text in this case is almost always just "I can't do that",
+    // not a real answer, so the actionable thing is the approval prompt.
+    if (permissionDenials.length > 0) {
+      session.pendingApprovalText = text;
+      const commands = permissionDenials.map((d) => `\`${d.message || d.toolName}\``).join('\n');
+      await channel.send({
+        content: `🔒 Claude wants to run something that isn't allowed by default:\n${commands}\n\nApprove it for this one attempt?`,
+        components: [buildBashApprovalRow()],
+      });
+      return;
     }
 
     const suffix = toolCallCount > 0 ? ` _(${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'})_` : '';
@@ -252,6 +272,43 @@ async function closeWithoutCommitting(channel, session, sessionManager) {
   await deleteChannelSoon(channel);
 }
 
+/**
+ * Approve button on a Bash-denial prompt — re-sends the same message with
+ * Bash allowed for that one re-run (see session.js's sendMessage for why
+ * this unlocks Bash entirely rather than just the specific denied
+ * command).
+ */
+export async function handleApproveBashButton(interaction, sessionManager) {
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (!session) {
+    await interaction.reply({ content: 'No active session in this channel.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (session.busy) {
+    await interaction.reply({ content: '⏳ Still working on another message.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const text = session.pendingApprovalText;
+  if (!text) {
+    await interaction.reply({
+      content: "That approval isn't valid anymore (a newer message replaced it).",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  session.pendingApprovalText = null;
+  await interaction.update({ content: `${interaction.message.content}\n\n✅ Approved.`, components: [] });
+  await runTurn(session, interaction.channel, text, sessionManager, { allowBash: true });
+}
+
+/** Deny button on a Bash-denial prompt — just lets Claude's "I can't do that" reply stand. */
+export async function handleDenyBashButton(interaction, sessionManager) {
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (session) session.pendingApprovalText = null;
+  await interaction.update({ content: `${interaction.message.content}\n\n🚫 Denied.`, components: [] });
+}
+
 /** Click on one of the multiple-choice option buttons rendered from a ```options block. */
 export async function handleOptionButton(interaction, sessionManager) {
   const session = sessionManager.getByChannel(interaction.channelId);
@@ -365,4 +422,6 @@ export {
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
+  APPROVE_BASH_BUTTON_ID,
+  DENY_BASH_BUTTON_ID,
 };

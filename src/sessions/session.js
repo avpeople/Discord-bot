@@ -14,7 +14,9 @@ A) First option
 B) Second option
 C) Third option
 \`\`\`
-Use at most 5 options (A-E), keep each option label short (under 60 characters — it becomes a button label), and only use this for real decisions, not for open-ended or yes/no questions where normal text is clearer.`;
+Use at most 5 options (A-E), keep each option label short (under 60 characters — it becomes a button label), and only use this for real decisions, not for open-ended or yes/no questions where normal text is clearer.
+
+If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.`;
 
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
@@ -61,6 +63,7 @@ export class Session {
     this.busy = false; // true while a turn is in flight
     this.closed = false;
     this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
+    this.pendingApprovalText = null; // the user turn text to re-send if a pending Bash denial is approved
 
     this._idleTimer = null;
     this._onIdleExpire = null; // set by SessionManager
@@ -87,11 +90,21 @@ export class Session {
   }
 
   /**
-   * Sends one user turn to Claude Code and resolves with the final
-   * `result` event. `onEvent` is called for every streamed event
-   * (assistant tool-use, etc.) so the caller can show progress.
+   * Sends one user turn to Claude Code and resolves with
+   * `{ result, permissionDenials }` — `result` is the final `result`
+   * event, `permissionDenials` is every `permission_denied` event seen
+   * during the turn (usually empty; see handlers.js for how the bot turns
+   * a non-empty list into an Approve/Deny prompt). `onEvent` is called for
+   * every streamed event (assistant tool-use, etc.) so the caller can show
+   * progress.
+   *
+   * `allowBash: true` is used for a one-time re-run after the user
+   * approves a Bash request that was previously denied — see the
+   * --disallowedTools comment below for why this unlocks Bash entirely
+   * for that one spawned process rather than just the specific command
+   * that was denied (couldn't be verified cleanly, see git history).
    */
-  sendMessage(text, { onEvent } = {}) {
+  sendMessage(text, { onEvent, allowBash = false } = {}) {
     if (this.closed) return Promise.reject(new Error('Session is closed'));
     if (this.busy) return Promise.reject(new Error('Still working on the previous message'));
 
@@ -109,24 +122,27 @@ export class Session {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--allowedTools', 'Read,Edit,Write,Glob,Grep',
-      // --allowedTools alone does NOT reliably block a tool it omits — verified
-      // directly against the CLI: with only --allowedTools set (no
-      // --disallowedTools), Claude ran Bash anyway despite it being absent from
-      // the allow list. --disallowedTools is the actual enforcement mechanism
-      // (confirmed: the first Bash call in a clean test was denied with a real
-      // permission_denied event, no workaround). Keep both — --allowedTools
-      // documents intent, --disallowedTools is what actually stops it. Note:
-      // this was verified on a dev machine whose Claude Code install also
-      // exposes a PowerShell tool, which Claude used as a workaround once when
-      // explicitly told "use whatever shell tool you have" — the production
-      // container (npm-installed CLI on node:20-slim) has no such alternative
-      // shell tool, so Bash is the only one to block there, but if this bot is
-      // ever run somewhere with another shell-execution tool available, that
-      // needs adding here too.
-      '--disallowedTools', 'Bash',
+      '--allowedTools', allowBash ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Edit,Write,Glob,Grep',
       '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
     ];
+    // --allowedTools alone does NOT reliably block a tool it omits — verified
+    // directly against the CLI: with only --allowedTools set (no
+    // --disallowedTools), Claude ran Bash anyway despite it being absent from
+    // the allow list. --disallowedTools is the actual enforcement mechanism
+    // (confirmed: the first Bash call in a clean test was denied with a real
+    // permission_denied event, no workaround). Keep both — --allowedTools
+    // documents intent, --disallowedTools is what actually stops it. Note:
+    // this was verified on a dev machine whose Claude Code install also
+    // exposes a PowerShell tool, which Claude used as a workaround once when
+    // explicitly told "use whatever shell tool you have" — the production
+    // container (npm-installed CLI on node:20-slim) has no such alternative
+    // shell tool, so Bash is the only one to block there, but if this bot is
+    // ever run somewhere with another shell-execution tool available, that
+    // needs adding here too. Only applied when allowBash is false — an
+    // approved re-run needs Bash to actually be usable.
+    if (!allowBash) {
+      args.push('--disallowedTools', 'Bash');
+    }
     if (this.claudeSessionId) {
       args.push('--resume', this.claudeSessionId);
     }
@@ -141,6 +157,7 @@ export class Session {
       let buffer = '';
       let lastResult = null;
       let stderr = '';
+      const permissionDenials = [];
 
       child.stdout.on('data', (chunk) => {
         buffer += chunk.toString();
@@ -160,6 +177,9 @@ export class Session {
             this._onChange?.(this);
           }
           if (event.type === 'result') lastResult = event;
+          if (event.type === 'system' && event.subtype === 'permission_denied') {
+            permissionDenials.push({ toolName: event.tool_name, message: event.message });
+          }
           onEvent?.(event);
         }
       });
@@ -179,7 +199,7 @@ export class Session {
           reject(new Error(`claude exited with code ${code}: ${stderr.slice(-2000)}`));
           return;
         }
-        resolve(lastResult);
+        resolve({ result: lastResult, permissionDenials });
       });
     });
   }
