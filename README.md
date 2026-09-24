@@ -55,12 +55,14 @@ drop it for a global rollout (~1 hour to propagate).
 
 ## 5. Deploy on Coolify
 
-1. New Resource → Docker Compose or Dockerfile app pointing at this repo.
-2. Attach **two persistent volumes**:
-   - `/data/claude-config` — holds the Claude Code login/session.
-   - `/data/workspaces` — cloned repos, reused between runs.
-3. Set the env vars from `.env.example` in Coolify.
-4. Deploy.
+1. New Resource → Docker Compose, pointing at this repo's
+   [docker-compose.yml](docker-compose.yml). It already declares the two
+   persistent volumes (`claude-config`, `workspaces`) Coolify will create and
+   keep across redeploys.
+2. Set the env vars from `.env.example` in Coolify's environment tab — the
+   compose file passes each one through via `${VAR}`, so anything not set
+   there won't reach the container.
+3. Deploy.
 
 ### One-time Claude login (subscription auth)
 

@@ -1,0 +1,24 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      ALLOWED_ROLE_ID: ${ALLOWED_ROLE_ID}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_COMMIT_NAME: ${GITHUB_COMMIT_NAME}
+      GITHUB_COMMIT_EMAIL: ${GITHUB_COMMIT_EMAIL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CLAUDE_CONFIG_DIR: /data/claude-config
+      WORKSPACE_DIR: /data/workspaces
+    volumes:
+      - claude-config:/data/claude-config
+      - workspaces:/data/workspaces
+
+volumes:
+  claude-config:
+  workspaces:
