@@ -61,6 +61,7 @@ import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
 import { handleSetLogChannel, handleSetStudioLogChannel } from './log-channel-handlers.js';
 import { initLogChannel } from './log-channel.js';
 import { startNotifyServer } from './notify-server.js';
+import { registerCommands } from './register-commands.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -105,6 +106,8 @@ async function stripLegacyBashButtons(channel) {
 
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  // Keep Discord's slash commands in sync with this deploy — no manual `npm run register` needed.
+  await registerCommands().catch((err) => console.error('Failed to register slash commands:', err));
   initLogChannel(client);
   startNotifyServer();
 

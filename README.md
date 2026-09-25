@@ -253,8 +253,9 @@ same variables in Coolify's environment settings.
 
 ## 4. Register slash commands
 
-Run once (locally, or via a shell into the deployed container) whenever
-the command definitions change:
+Automatic: the bot registers its commands every time it starts, so a
+redeploy is enough when the command definitions change. To do it by hand
+anyway (locally, or via a shell into the deployed container):
 
 ```bash
 npm install

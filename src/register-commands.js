@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { pathToFileURL } from 'node:url';
 import { REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
 
 const commands = [
@@ -155,9 +156,14 @@ const commands = [
     .toJSON(),
 ];
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
-async function main() {
+/**
+ * Registers (overwrites) the bot's slash commands with Discord. index.js
+ * calls this on every boot, so new/changed commands go live with each
+ * deploy; `npm run register` still runs it by hand. A bulk overwrite is
+ * idempotent, so re-sending an unchanged list is harmless.
+ */
+export async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   const clientId = process.env.DISCORD_CLIENT_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
 
@@ -170,7 +176,10 @@ async function main() {
   console.log('Done.');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run directly (`npm run register`) — not when imported by index.js.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  registerCommands().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
