@@ -102,7 +102,6 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
     ownerId: user.id,
     allowedRoleId: config.discord.allowedRoleId,
     repoFullName: fullName,
-    sessionId: id,
   });
 
   const session = await sessionManager.createSession({

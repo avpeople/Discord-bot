@@ -17,13 +17,19 @@ async function ensureCategory(guild) {
 /**
  * Creates a private text channel under the Claude Sessions category,
  * visible only to the invoking user, the allowed role, and the bot itself.
+ * Named `claude-<owner>-<repo>` (e.g. claude-avpeople-live-nz); a second
+ * open session on the same repo gets `-2`, then `-3`, and so on. Sessions
+ * are tracked by channel id, so the name is purely for people.
  */
-export async function createSessionChannel({ guild, ownerId, allowedRoleId, repoFullName, sessionId }) {
+export async function createSessionChannel({ guild, ownerId, allowedRoleId, repoFullName }) {
   const category = await ensureCategory(guild);
-  const safeName = repoFullName.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+  const baseName = `claude-${repoFullName.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').toLowerCase()}`;
+  const taken = new Set(guild.channels.cache.filter((c) => c.parentId === category.id).map((c) => c.name));
+  let name = baseName;
+  for (let n = 2; taken.has(name); n += 1) name = `${baseName}-${n}`;
 
   const channel = await guild.channels.create({
-    name: `claude-${safeName}-${sessionId}`,
+    name,
     type: ChannelType.GuildText,
     parent: category.id,
     permissionOverwrites: [
