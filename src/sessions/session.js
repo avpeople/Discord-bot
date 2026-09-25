@@ -18,8 +18,7 @@ Use at most 5 options (A-E), keep each option label short (under 60 characters �
 
 If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
 
-IMPORTANT — Bash tool policy, overrides any other instinct you have about unavailable tools: Bash is currently switched off by a permission setting in this environment, not something that was never built — attempting to call it is exactly what shows the user a real Approve/Deny button in Discord letting them switch it on for you on the spot, for that one attempt. This is a live mechanism the user relies on, and it only works if you actually call the tool rather than reasoning in advance that it won't work.
-So: whenever a task would benefit from a shell command (npm/build tools, running tests, git operations beyond what your other tools cover, checking a command's output, anything), call Bash for it FIRST, before writing any explanation — even if it isn't listed among your available tools, or a prior attempt in this same conversation failed. Do not write "Bash isn't available" or "there's no approval-prompt fallback" or similar before trying — that's not something you can know in advance, and saying it without trying is simply incorrect. Only mention Bash being unavailable after an actual attempt in this same turn failed AND the user then declined the resulting approval prompt.`;
+You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).`;
 
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
@@ -68,7 +67,6 @@ export class Session {
     this.busy = false; // true while a turn is in flight
     this.closed = false;
     this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
-    this.pendingApprovalText = null; // the user turn text to re-send if a pending Bash denial is approved
 
     this._idleTimer = null;
     this._onIdleExpire = null; // set by SessionManager
@@ -96,23 +94,11 @@ export class Session {
   }
 
   /**
-   * Sends one user turn to Claude Code and resolves with
-   * `{ result, permissionDenials }` — `result` is the final `result`
-   * event, `permissionDenials` is every denied Bash attempt seen during
-   * the turn (usually empty; see handlers.js for how the bot turns a
-   * non-empty list into an Approve/Deny prompt). Detected by matching the
-   * denied tool_result's error text, not a dedicated system event — see
-   * the detection code below for why. `onEvent` is called for every
-   * streamed event (assistant tool-use, etc.) so the caller can show
-   * progress.
-   *
-   * `allowBash: true` is used for a one-time re-run after the user
-   * approves a Bash request that was previously denied — see the
-   * --disallowedTools comment below for why this unlocks Bash entirely
-   * for that one spawned process rather than just the specific command
-   * that was denied (couldn't be verified cleanly, see git history).
+   * Sends one user turn to Claude Code and resolves with `{ result }` —
+   * the final `result` event. `onEvent` is called for every streamed
+   * event (assistant tool-use, etc.) so the caller can show progress.
    */
-  sendMessage(text, { onEvent, allowBash = false } = {}) {
+  sendMessage(text, { onEvent } = {}) {
     if (this.closed) return Promise.reject(new Error('Session is closed'));
     if (this.busy) return Promise.reject(new Error('Still working on the previous message'));
 
@@ -130,27 +116,15 @@ export class Session {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--allowedTools', allowBash ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Edit,Write,Glob,Grep',
+      '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash',
       '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
     ];
-    // --allowedTools alone does NOT reliably block a tool it omits — verified
-    // directly against the CLI: with only --allowedTools set (no
-    // --disallowedTools), Claude ran Bash anyway despite it being absent from
-    // the allow list. --disallowedTools is the actual enforcement mechanism
-    // (confirmed: the first Bash call in a clean test was denied with a real
-    // permission_denied event, no workaround). Keep both — --allowedTools
-    // documents intent, --disallowedTools is what actually stops it. Note:
-    // this was verified on a dev machine whose Claude Code install also
-    // exposes a PowerShell tool, which Claude used as a workaround once when
-    // explicitly told "use whatever shell tool you have" — the production
-    // container (npm-installed CLI on node:20-slim) has no such alternative
-    // shell tool, so Bash is the only one to block there, but if this bot is
-    // ever run somewhere with another shell-execution tool available, that
-    // needs adding here too. Only applied when allowBash is false — an
-    // approved re-run needs Bash to actually be usable.
-    if (!allowBash) {
-      args.push('--disallowedTools', 'Bash');
-    }
+    // Agent (and its older name, Task) is blocked so each Discord chat stays
+    // a single Claude Code conversation — subagents start with a fresh
+    // context and re-read files, which multiplies token usage.
+    // --disallowedTools is the actual enforcement mechanism; --allowedTools
+    // alone does NOT reliably block a tool it omits (verified against the CLI).
+    args.push('--disallowedTools', 'Agent,Task');
     if (this.claudeSessionId) {
       args.push('--resume', this.claudeSessionId);
     }
@@ -165,7 +139,6 @@ export class Session {
       let buffer = '';
       let lastResult = null;
       let stderr = '';
-      const permissionDenials = [];
 
       child.stdout.on('data', (chunk) => {
         buffer += chunk.toString();
@@ -185,29 +158,6 @@ export class Session {
             this._onChange?.(this);
           }
           if (event.type === 'result') lastResult = event;
-          // Verified directly against the real production container (CLI
-          // 2.1.197 — a different version/build than a Windows dev machine's
-          // native install, which instead emits a `system`/`permission_denied`
-          // event that this container never does): a disallowed Bash call
-          // comes back as a plain `tool_result` with `is_error: true` and a
-          // content string like "Error: No such tool available: Bash. Bash
-          // exists but is not enabled in this context." — not a dedicated
-          // system event at all. `--disallowedTools Bash` removes Bash from
-          // the exposed tool list entirely on this version rather than
-          // exposing-but-denying it, so Claude sees it as absent, and this is
-          // the only place that shows up.
-          if (event.type === 'user' && Array.isArray(event.message?.content)) {
-            for (const block of event.message.content) {
-              if (
-                block.type === 'tool_result' &&
-                block.is_error &&
-                typeof block.content === 'string' &&
-                /no such tool available: bash/i.test(block.content)
-              ) {
-                permissionDenials.push({ toolName: 'Bash', message: block.content });
-              }
-            }
-          }
           onEvent?.(event);
         }
       });
@@ -227,7 +177,7 @@ export class Session {
           reject(new Error(`claude exited with code ${code}: ${stderr.slice(-2000)}`));
           return;
         }
-        resolve({ result: lastResult, permissionDenials });
+        resolve({ result: lastResult });
       });
     });
   }

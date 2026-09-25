@@ -54,12 +54,8 @@ trust to make that call.
    distinct questions to ask, it's instructed to ask them one at a time
    rather than listing them all in one reply — see `OPTIONS_SYSTEM_PROMPT`
    in [src/sessions/session.js](src/sessions/session.js).
-6. Bash is blocked by default (see "Tool permissions" below) — if Claude
-   wants to run something that needs it, the bot shows an **Approve** /
-   **Deny** prompt with what it wanted to run instead of just letting the
-   turn fail silently. Approve re-sends the same message with Bash allowed
-   for that one attempt; Deny leaves Claude's "I can't do that" as the
-   final answer.
+6. Claude can run shell commands (Bash) without asking — see "Tool
+   permissions" below.
 7. `/code close` (run inside the session channel) asks **Push** (commit
    anything pending the same way Commit does, then close) or **Exit**
    (close without committing — pending changes are discarded).
@@ -100,7 +96,6 @@ makes the bot post one line per significant event to that channel:
   Push-then-close
 - 🔴 a session is closed (exit or push-then-close) / ⏱️ auto-closed by the
   4-hour idle timeout
-- 🔓 / 🚫 a Bash request is approved or denied
 - 🔊 / 🔇 a voice bridge is started or stopped (`/voice join` / `/voice leave`)
 
 Logging is best-effort ([src/log-channel.js](src/log-channel.js)) — if no
@@ -290,38 +285,14 @@ section before relying on this in production.
 ## Notes / things to tune
 
 - **Tool permissions**: [src/sessions/session.js](src/sessions/session.js)
-  restricts Claude to `Read,Edit,Write,Glob,Grep` and explicitly blocks
-  `Bash` via `--disallowedTools` — the actual enforcement mechanism,
-  verified directly against the CLI (`--allowedTools` alone does **not**
-  reliably block a tool it just omits). Widen this only if you trust
-  everyone with the Discord role, and if you ever add another
-  shell-execution tool to the environment this runs in, block that too.
-- **Bash approval scope**: clicking Approve on a Bash-denial prompt
-  unlocks Bash entirely for that one re-run (`--allowedTools` including
-  `Bash`, no `--disallowedTools`), not just the specific command Claude
-  wanted to run — scoping to the exact command via Claude Code's
-  `Bash(<command>)` allow-list syntax couldn't be cleanly verified against
-  this bot's actual environment (see the commit history around the
-  Approve/Deny feature for why), so the simpler, verified-working version
-  shipped instead. Since the conversation resumes right where it left off,
-  Claude will almost always just run the same command it originally asked
-  for — but the guardrail is "Bash is on for this turn," not "only this
-  exact command."
-- **Detecting a Bash denial has two paths**, not one: the precise one is a
-  real `tool_result` error from an actual attempted call (see
-  `sendMessage` in [src/sessions/session.js](src/sessions/session.js)).
-  The system prompt tells Claude to always attempt the call rather than
-  assume it can't — but that instruction isn't 100% reliable in practice
-  (confirmed recurring live, in fresh sessions, more than once). As a
-  backstop, [src/sessions/reply.js](src/sessions/reply.js)'s
-  `looksLikeBashUnavailableClaim` scans Claude's reply text for the
-  "bash/shell ... isn't available/enabled" pattern and offers the same
-  Approve/Deny prompt even when no real tool call was ever attempted. This
-  is a heuristic, not exact — it's deliberately narrow (requires both a
-  bash/shell mention and an unavailability phrase near each other) to
-  avoid false-triggering on unrelated sentences, but it can still miss
-  phrasings that don't match, or in principle misfire on something
-  genuinely unrelated that happens to read similarly.
+  allows `Read,Edit,Write,Glob,Grep,Bash`, so Claude can run shell
+  commands inside the session's repo checkout without asking. Anyone with
+  the Discord role can therefore run arbitrary commands in the bot's
+  container — only give that role to people you trust. Subagents
+  (`Agent`/`Task`) are blocked via `--disallowedTools` so each Discord
+  chat stays a single Claude Code conversation (`--allowedTools` alone
+  does **not** reliably block a tool it just omits — verified against the
+  CLI).
 - **Concurrency**: one message is processed at a time per session
   (`session.busy` guard) — sending another message while Claude is still
   replying gets a "still working" notice rather than queuing or racing.

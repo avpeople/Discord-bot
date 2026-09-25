@@ -6,49 +6,9 @@ export const EXIT_BUTTON_ID = 'claude-session:exit';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
 export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
 export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
-export const APPROVE_BASH_BUTTON_ID = 'claude-session:approve-bash';
-export const DENY_BASH_BUTTON_ID = 'claude-session:deny-bash';
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
-
-/**
- * Fallback for when Claude asserts it can't use Bash/a shell in prose
- * without ever actually attempting the tool call — which means no
- * tool_result denial ever fires (see session.js's OPTIONS_SYSTEM_PROMPT
- * for the primary fix: instructing Claude to always try first). That
- * instruction isn't 100% reliable in practice (confirmed recurring live,
- * even in fresh sessions), so this is a second, independent detection
- * path: scan the final reply text for the pattern "bash/shell ... not
- * available/isn't enabled/can't run" and treat it the same as a real
- * denial, offering the Approve/Deny prompt anyway. Deliberately requires
- * BOTH a bash/shell-tool mention AND an unavailability phrase within a
- * short span of each other, not just either alone, to avoid false
- * positives on unrelated "I can't do X" sentences.
- */
-export function looksLikeBashUnavailableClaim(replyText) {
-  // Pattern A: "bash/shell ... isn't/aren't/not ... available/enabled/possible"
-  //   e.g. "Bash isn't available in this environment"
-  // Pattern B: "no shell/bash access/tool" — a distinct phrasing that
-  //   doesn't fit pattern A's word order at all (confirmed live: "this
-  //   environment has no shell access" matched neither the old pattern
-  //   nor a reworded version of it, so this is a separate alternative
-  //   rather than a tweak to pattern A).
-  // Pattern C: "bash/shell is disabled/off/turned off" — confirmed live:
-  //   "Bash is disabled here" uses a word ("disabled") that fits neither
-  //   pattern A's list (available/enabled/possible) nor pattern B.
-  return (
-    /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
-      replyText,
-    ) ||
-    /\bno\b[^.!?\n]{0,20}\b(bash|shell)\b[^.!?\n]{0,20}\b(access|tool)\b/i.test(replyText) ||
-    // Negative lookahead excludes "bash profile/script/alias/function is
-    // disabled", which is about shell config, not the Bash tool itself.
-    /\b(bash|shell)\b(?![^.!?\n]{0,15}\b(profile|script|alias|function)\b)[^.!?\n]{0,40}\b(is|are|'s)\b[^.!?\n]{0,20}\b(disabled|off|turned off)\b/i.test(
-      replyText,
-    )
-  );
-}
 
 /** Splits long text into Discord-message-sized chunks, breaking on newlines where possible. */
 export function chunkMessage(text, maxLen = DISCORD_MAX_LEN) {
@@ -141,21 +101,6 @@ export function buildPostReplyRow({ used } = {}) {
 
   row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
   return row;
-}
-
-/**
- * The Approve / Deny row shown when Claude's turn was denied a tool
- * (currently always Bash — see session.js). Approve re-sends the same
- * message with Bash allowed for that one re-run; Deny leaves Claude's
- * "I can't do that" response as the final answer. No Exit button here —
- * closing mid-approval isn't a case worth a dedicated button, /code close
- * or an Exit on an earlier message still works.
- */
-export function buildBashApprovalRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(APPROVE_BASH_BUTTON_ID).setLabel('Approve').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(DENY_BASH_BUTTON_ID).setLabel('Deny').setStyle(ButtonStyle.Danger),
-  );
 }
 
 /** The Push / Exit choice shown by `/code close`. */

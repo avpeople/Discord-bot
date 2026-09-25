@@ -13,8 +13,6 @@ import {
   handleOptionButton,
   handleClosePushButton,
   handleCloseExitButton,
-  handleApproveBashButton,
-  handleDenyBashButton,
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
@@ -22,8 +20,6 @@ import {
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
-  APPROVE_BASH_BUTTON_ID,
-  DENY_BASH_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -55,6 +51,26 @@ const client = new Client({
 
 const sessionManager = new SessionManager();
 
+// Button IDs from the old Bash Approve/Deny prompt, which no longer exists
+// (Bash is always allowed now). Used to strip leftover buttons from
+// messages posted before that change.
+const LEGACY_BASH_BUTTON_IDS = new Set(['claude-session:approve-bash', 'claude-session:deny-bash']);
+
+/** Removes leftover Bash Approve/Deny buttons from the bot's recent messages in `channel`. */
+async function stripLegacyBashButtons(channel) {
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages) return;
+  for (const message of messages.values()) {
+    if (message.author.id !== client.user.id) continue;
+    const hasLegacyButton = message.components.some((row) =>
+      row.components?.some((c) => LEGACY_BASH_BUTTON_IDS.has(c.customId)),
+    );
+    if (hasLegacyButton) {
+      await message.edit({ components: [] }).catch((err) => console.error('Failed to strip old Bash buttons:', err));
+    }
+  }
+}
+
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   initLogChannel(client);
@@ -67,6 +83,7 @@ client.once('ready', async () => {
   for (const session of restored) {
     const channel = await client.channels.fetch(session.channelId).catch(() => null);
     if (channel) {
+      await stripLegacyBashButtons(channel);
       await channel
         .send('🔄 Bot restarted — this session is back and remembers the conversation. Carry on!')
         .catch((err) => console.error('Failed to post restore notice:', err));
@@ -159,12 +176,9 @@ client.on('interactionCreate', async (interaction) => {
       return handleCloseExitButton(interaction, sessionManager);
     }
 
-    if (interaction.isButton() && interaction.customId === APPROVE_BASH_BUTTON_ID) {
-      return handleApproveBashButton(interaction, sessionManager);
-    }
-
-    if (interaction.isButton() && interaction.customId === DENY_BASH_BUTTON_ID) {
-      return handleDenyBashButton(interaction, sessionManager);
+    // Any old Approve/Deny button the startup sweep missed just removes itself when clicked.
+    if (interaction.isButton() && LEGACY_BASH_BUTTON_IDS.has(interaction.customId)) {
+      return interaction.update({ components: [] });
     }
   } catch (err) {
     console.error('Unhandled interaction error:', err);
