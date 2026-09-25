@@ -34,10 +34,19 @@ export function looksLikeBashUnavailableClaim(replyText) {
   //   environment has no shell access" matched neither the old pattern
   //   nor a reworded version of it, so this is a separate alternative
   //   rather than a tweak to pattern A).
+  // Pattern C: "bash/shell is disabled/off/turned off" — confirmed live:
+  //   "Bash is disabled here" uses a word ("disabled") that fits neither
+  //   pattern A's list (available/enabled/possible) nor pattern B.
   return (
     /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
       replyText,
-    ) || /\bno\b[^.!?\n]{0,20}\b(bash|shell)\b[^.!?\n]{0,20}\b(access|tool)\b/i.test(replyText)
+    ) ||
+    /\bno\b[^.!?\n]{0,20}\b(bash|shell)\b[^.!?\n]{0,20}\b(access|tool)\b/i.test(replyText) ||
+    // Negative lookahead excludes "bash profile/script/alias/function is
+    // disabled", which is about shell config, not the Bash tool itself.
+    /\b(bash|shell)\b(?![^.!?\n]{0,15}\b(profile|script|alias|function)\b)[^.!?\n]{0,40}\b(is|are|'s)\b[^.!?\n]{0,20}\b(disabled|off|turned off)\b/i.test(
+      replyText,
+    )
   );
 }
 
