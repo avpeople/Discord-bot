@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import simpleGit from 'simple-git';
+import { config } from '../config.js';
 import {
   prepareRepo,
   commitAndPush,
@@ -47,7 +49,7 @@ export class SessionManager {
         anyDropped = true;
         continue;
       }
-      const git = simpleGit(data.dir);
+      const git = data.kind === 'chat' ? null : simpleGit(data.dir);
       const session = new Session({ ...data, git });
       this._wire(session);
       this.sessionsByChannel.set(session.channelId, session);
@@ -102,6 +104,35 @@ export class SessionManager {
       git,
       branchName,
       defaultBranch,
+    });
+    this._wire(session);
+
+    this.sessionsByChannel.set(channelId, session);
+    this._persist();
+    return session;
+  }
+
+  /**
+   * A plain Claude chat with no repo behind it. Claude still needs a working
+   * directory, so it gets an empty scratch folder (removed on close).
+   */
+  async createChatSession({ id: providedId, channelId, guildId, ownerId }) {
+    const id = providedId || crypto.randomUUID().slice(0, 8);
+    const dir = path.join(config.workspaceDir, '_chats', id);
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    const session = new Session({
+      id,
+      kind: 'chat',
+      channelId,
+      guildId,
+      ownerId,
+      owner: null,
+      repo: null,
+      dir,
+      git: null,
+      branchName: null,
+      defaultBranch: null,
     });
     this._wire(session);
 
@@ -214,17 +245,19 @@ export class SessionManager {
     };
     logEvent(
       session.guildId,
-      `${labels[reason] ?? labels.exit} on **${session.owner}/${session.repo}** — total cost ~$${session.totalCostUsd.toFixed(2)}`,
+      `${labels[reason] ?? labels.exit} on **${session.label}** — total cost ~$${session.totalCostUsd.toFixed(2)}`,
     );
   }
 
   async _handleIdleExpire(session) {
     // Idle timeout: discard anything not already committed+merged (Commit
     // merges immediately now, so there's never a dangling PR to open here),
-    // then close as normal.
-    await discardPendingChanges(session.git).catch((err) => {
-      console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
-    });
+    // then close as normal. Chats have no repo, so nothing to discard.
+    if (!session.isChat) {
+      await discardPendingChanges(session.git).catch((err) => {
+        console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
+      });
+    }
     await this.close(session, 'idle');
     this.onIdleExpire?.(session);
   }

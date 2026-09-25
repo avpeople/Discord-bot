@@ -4,6 +4,8 @@ import { SessionManager } from './sessions/manager.js';
 import {
   hasAccess,
   handleCodeNew,
+  handleCodeChat,
+  handleSetChatChannel,
   handleCodeClose,
   handleRepoSelected,
   handleSessionMessage,
@@ -46,6 +48,7 @@ import {
   PANEL_COMMIT_BUTTON_ID,
   PANEL_CLOSE_BUTTON_ID,
   PANEL_INIT_BUTTON_ID,
+  NEW_CHAT_CHANNEL_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -90,7 +93,7 @@ sessionManager.onIdleExpire = async (session) => {
   const channel = await client.channels.fetch(session.channelId).catch(() => null);
   if (!channel) return;
   await channel
-    .send('⏱️ This session was closed after 4 hours idle. Start a new one with `/code new`.')
+    .send(`⏱️ This ${session.isChat ? 'chat' : 'session'} was closed after 4 hours idle. Start a new one with \`/code ${session.isChat ? 'chat' : 'new'}\`.`)
     .catch((err) => console.error('Failed to post idle-close notice:', err));
 };
 
@@ -149,11 +152,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'code') {
       const sub = interaction.options.getSubcommand();
       if (sub === 'new') return handleCodeNew(interaction);
+      if (sub === 'chat') return handleCodeChat(interaction, sessionManager);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
       if (sub === 'model') return handleCodeModel(interaction, sessionManager);
       if (sub === 'status') return handleCodeStatus(interaction, sessionManager);
       if (sub === 'init') return handleCodeInit(interaction, sessionManager);
       if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
+      if (sub === 'set-chat-channel') return handleSetChatChannel(interaction);
       if (sub === 'set-log-channel') return handleSetLogChannel(interaction);
       if (sub === 'set-coolify-log-channel') return handleSetCoolifyLogChannel(interaction);
       return;
@@ -258,6 +263,10 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === PANEL_INIT_BUTTON_ID) {
       return handleCodeInit(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === NEW_CHAT_CHANNEL_BUTTON_ID) {
+      return handleCodeChat(interaction, sessionManager);
     }
 
     // Status buttons under the repo picker, and the Refresh button on their replies (same id + ':refresh').

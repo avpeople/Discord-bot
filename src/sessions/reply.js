@@ -24,6 +24,8 @@ export const PANEL_MODEL_SELECT_ID = 'claude-session:panel-model';
 export const PANEL_COMMIT_BUTTON_ID = 'claude-session:panel-commit';
 export const PANEL_CLOSE_BUTTON_ID = 'claude-session:panel-close';
 export const PANEL_INIT_BUTTON_ID = 'claude-session:panel-init';
+// Under the repo picker: opens a plain Claude chat channel (no repo).
+export const NEW_CHAT_CHANNEL_BUTTON_ID = 'claude-session:new-chat-channel';
 
 const MODEL_CHOICES = [
   { value: 'sonnet', label: 'Sonnet', description: 'Fast and cheaper — good for most tasks' },
@@ -41,6 +43,34 @@ const MODEL_CHOICES = [
  * unset, meaning Claude Code's own account default.
  */
 export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) {
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+  );
+  if (!hasProjectNotes) {
+    buttons.addComponents(
+      new ButtonBuilder().setCustomId(PANEL_INIT_BUTTON_ID).setLabel('Project Notes').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    );
+  }
+  buttons.addComponents(
+    new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
+  );
+
+  return [buildModelSelectRow(model, defaultModel), buttons];
+}
+
+/** The chat version of the panel: model dropdown, New Chat and Close — no repo buttons. */
+export function buildChatPanelRows({ model, defaultModel }) {
+  return [
+    buildModelSelectRow(model, defaultModel),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('New Chat').setEmoji('🆕').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function buildModelSelectRow(model, defaultModel) {
   const defaultName = defaultModel
     ? MODEL_CHOICES.find((c) => c.value === defaultModel)?.label ?? defaultModel
     : 'account setting';
@@ -55,21 +85,7 @@ export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) 
         default: c.value === (model ?? 'default'),
       })),
     );
-
-  const buttons = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setEmoji('📄').setStyle(ButtonStyle.Secondary),
-  );
-  if (!hasProjectNotes) {
-    buttons.addComponents(
-      new ButtonBuilder().setCustomId(PANEL_INIT_BUTTON_ID).setLabel('Project Notes').setEmoji('📝').setStyle(ButtonStyle.Secondary),
-    );
-  }
-  buttons.addComponents(
-    new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
-  );
-
-  return [new ActionRowBuilder().addComponents(select), buttons];
+  return new ActionRowBuilder().addComponents(select);
 }
 
 const DISCORD_MAX_LEN = 2000;
@@ -232,6 +248,14 @@ export function buildPostReplyRow({ used } = {}) {
 
   row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
   return row;
+}
+
+/** The row under each reply in a chat session: New Chat (forgets the conversation) and Exit. */
+export function buildChatReplyRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('New Chat').setEmoji('🆕').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger),
+  );
 }
 
 /**

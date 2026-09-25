@@ -1,28 +1,31 @@
 import { ChannelType, PermissionsBitField } from 'discord.js';
 
 const CATEGORY_NAME = 'Claude Sessions';
+export const CHAT_CATEGORY_NAME = 'Claude Chats';
 
-/** Finds (or creates) the category all session channels live under. */
-async function ensureCategory(guild) {
+/** Finds (or creates) the category session channels live under. */
+async function ensureCategory(guild, categoryName) {
   const existing = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name === CATEGORY_NAME,
+    (c) => c.type === ChannelType.GuildCategory && c.name === categoryName,
   );
   if (existing) return existing;
   return guild.channels.create({
-    name: CATEGORY_NAME,
+    name: categoryName,
     type: ChannelType.GuildCategory,
   });
 }
 
 /**
- * Creates a private text channel under the Claude Sessions category,
+ * Creates a private text channel under the Claude Sessions category (or
+ * `categoryName`, e.g. Claude Chats for plain chats),
  * visible only to the invoking user, the allowed role, and the bot itself.
- * Named `claude-<owner>-<repo>` (e.g. claude-avpeople-live-nz); a second
+ * Named `claude-<owner>-<repo>` (e.g. claude-avpeople-live-nz), or
+ * `claude-chat` for a plain chat (repoFullName 'chat'); a second
  * open session on the same repo gets `-2`, then `-3`, and so on. Sessions
  * are tracked by channel id, so the name is purely for people.
  */
-export async function createSessionChannel({ guild, ownerId, allowedRoleId, repoFullName }) {
-  const category = await ensureCategory(guild);
+export async function createSessionChannel({ guild, ownerId, allowedRoleId, repoFullName, categoryName = CATEGORY_NAME }) {
+  const category = await ensureCategory(guild, categoryName);
   const baseName = `claude-${repoFullName.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').toLowerCase()}`;
   const taken = new Set(guild.channels.cache.filter((c) => c.parentId === category.id).map((c) => c.name));
   let name = baseName;

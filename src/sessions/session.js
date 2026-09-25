@@ -18,11 +18,16 @@ C) Third option
 \`\`\`
 Use at most 5 options (A-E), keep each option label short (under 60 characters — it becomes a button label), and only use this for real decisions, not for open-ended or yes/no questions where normal text is clearer.
 
-If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
+If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.`;
 
-You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).
+// Code sessions only: they run in a fresh clone of a repo.
+const CODE_SESSION_PROMPT = `You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).
 
 This is a fresh clone of the repo, so dependencies are NOT installed yet. Whenever you need to build, type-check, lint or test, install them first — don't skip verification because of it, and don't tell the user you couldn't check because deps are missing. Use the repo's own package manager, matching its lockfile: package-lock.json → \`npm ci\`, pnpm-lock.yaml → \`pnpm install --frozen-lockfile\`, yarn.lock → \`yarn install --frozen-lockfile\`, otherwise \`npm install\`; for Python use a venv (\`python -m venv .venv && .venv/bin/pip install -r requirements.txt\`). Installing takes a while, so give those commands a long timeout (e.g. 600000 ms). Dependency folders (node_modules, .venv) are normally gitignored, so they won't be committed — but if the repo's .gitignore doesn't cover them, add them to it rather than committing them. Only report that you couldn't verify something if installing or running it actually failed, and say what the error was.`;
+
+// Chat sessions only: a plain conversation with no repo behind it.
+const CHAT_SESSION_PROMPT = `This is a general-purpose chat, not a coding session — there is no repo or project here, and your working directory is just an empty scratch folder. Answer like a helpful assistant in a normal conversation. You can search and read the web, and read any files the user attaches.
+Discord doesn't render markdown tables, so use lists instead of tables.`;
 
 // Tells Claude where and how to pull in other GitHub repos for reference.
 // `gh` authenticates from GITHUB_TOKEN, so this reaches any repo that token
@@ -50,6 +55,7 @@ Reference repos are read-only: never edit, commit or push in ${refsDir} — only
 export class Session {
   constructor({
     id,
+    kind = 'code',
     channelId,
     guildId,
     ownerId,
@@ -67,6 +73,9 @@ export class Session {
     createdAt = Date.now(),
   }) {
     this.id = id;
+    // 'code' — Claude Code on a cloned repo; 'chat' — a plain conversation
+    // with no repo (owner, repo, git and branch fields are all null).
+    this.kind = kind;
     this.channelId = channelId;
     this.guildId = guildId;
     this.ownerId = ownerId;
@@ -121,6 +130,7 @@ export class Session {
   toJSON() {
     return {
       id: this.id,
+      kind: this.kind,
       channelId: this.channelId,
       guildId: this.guildId,
       ownerId: this.ownerId,
@@ -136,6 +146,15 @@ export class Session {
       totalCostUsd: this.totalCostUsd,
       createdAt: this.createdAt,
     };
+  }
+
+  get isChat() {
+    return this.kind === 'chat';
+  }
+
+  /** What this session is about, for status lists and log lines. */
+  get label() {
+    return this.isChat ? 'Chat' : `${this.owner}/${this.repo}`;
   }
 
   /**
@@ -190,24 +209,34 @@ export class Session {
     };
     if (config.claude.apiKey) env.ANTHROPIC_API_KEY = config.claude.apiKey;
 
-    const refsDir = `${this.dir}-refs`;
-    fs.mkdirSync(refsDir, { recursive: true });
-
     const args = [
       '-p', text,
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
-      '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${referenceReposPrompt(refsDir)}`,
-      '--add-dir', refsDir,
     ];
     // Agent (and its older name, Task) is blocked so each Discord chat stays
     // a single Claude Code conversation — subagents start with a fresh
     // context and re-read files, which multiplies token usage.
     // --disallowedTools is the actual enforcement mechanism; --allowedTools
     // alone does NOT reliably block a tool it omits (verified against the CLI).
-    args.push('--disallowedTools', 'Agent,Task');
+    if (this.isChat) {
+      // No repo to work on, so no shell or file editing — just the web and reading attachments.
+      args.push(
+        '--allowedTools', 'Read,WebSearch,WebFetch',
+        '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${CHAT_SESSION_PROMPT}`,
+        '--disallowedTools', 'Agent,Task,Bash,Edit,Write,NotebookEdit',
+      );
+    } else {
+      const refsDir = `${this.dir}-refs`;
+      fs.mkdirSync(refsDir, { recursive: true });
+      args.push(
+        '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
+        '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${CODE_SESSION_PROMPT}\n\n${referenceReposPrompt(refsDir)}`,
+        '--add-dir', refsDir,
+        '--disallowedTools', 'Agent,Task',
+      );
+    }
     const model = this.model || config.claude.defaultModel;
     if (model) {
       args.push('--model', model);

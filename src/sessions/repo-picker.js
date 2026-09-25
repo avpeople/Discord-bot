@@ -1,6 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { listAccessibleRepos } from '../github.js';
-import { SESSIONS_STATUS_BUTTON_ID, COOLIFY_STATUS_BUTTON_ID } from './reply.js';
+import { SESSIONS_STATUS_BUTTON_ID, COOLIFY_STATUS_BUTTON_ID, NEW_CHAT_CHANNEL_BUTTON_ID } from './reply.js';
 
 export const REPO_SELECT_ID = 'claude-session:repo-select';
 // Distinct id for the persistent picker channel's select menu (see
@@ -52,13 +52,14 @@ export async function buildRepoPickerReply(selectId = REPO_SELECT_ID) {
 }
 
 /**
- * Open Sessions and Server Status buttons under the picker. Server Status
- * always shows — if Coolify isn't configured, clicking it says which
- * setting is missing (see handleCoolifyStatus), which is easier to spot
- * than a button that silently isn't there.
+ * Chat with Claude, Open Sessions and Server Status buttons under the
+ * picker. Server Status always shows — if Coolify isn't configured,
+ * clicking it says which setting is missing (see handleCoolifyStatus),
+ * which is easier to spot than a button that silently isn't there.
  */
 function buildStatusButtonsRow() {
   return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(NEW_CHAT_CHANNEL_BUTTON_ID).setLabel('Chat with Claude').setEmoji('💬').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(SESSIONS_STATUS_BUTTON_ID).setLabel('Open Sessions').setEmoji('📋').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(COOLIFY_STATUS_BUTTON_ID).setLabel('Server Status').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
   );

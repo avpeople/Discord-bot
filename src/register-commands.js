@@ -12,6 +12,9 @@ const commands = [
         .setDescription('Start a new Claude Code session: pick a repo, get a private channel to chat in'),
     )
     .addSubcommand((sub) =>
+      sub.setName('chat').setDescription('Start a plain chat with Claude in a private channel (no repo)'),
+    )
+    .addSubcommand((sub) =>
       sub
         .setName('close')
         .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
@@ -47,6 +50,14 @@ const commands = [
         .setDescription('Make a channel always show the repo picker (posts it there now)')
         .addChannelOption((opt) =>
           opt.setName('channel').setDescription('The channel to use as the permanent picker').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-chat-channel')
+        .setDescription('Post a permanent "Chat with Claude" button in a channel')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to post the button in').setRequired(true),
         ),
     )
     .addSubcommand((sub) =>

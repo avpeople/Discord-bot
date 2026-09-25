@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionsBitField } from 'discord.js';
 import { config } from '../config.js';
 import { buildRepoPickerReply, REPO_SELECT_ID } from './repo-picker.js';
-import { createSessionChannel } from './channel.js';
+import { createSessionChannel, CHAT_CATEGORY_NAME } from './channel.js';
 import {
   buildPostReplyRow,
   buildOptionsRows,
@@ -16,6 +16,8 @@ import {
   buildRevertRow,
   buildRevertConfirmRow,
   buildSessionPanelRows,
+  buildChatPanelRows,
+  buildChatReplyRow,
   chunkMessage,
   parseOptionsBlock,
   describeToolUse,
@@ -40,6 +42,7 @@ import {
   PANEL_COMMIT_BUTTON_ID,
   PANEL_CLOSE_BUTTON_ID,
   PANEL_INIT_BUTTON_ID,
+  NEW_CHAT_CHANNEL_BUTTON_ID,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 import { pendingChanges, snapshotWorkingTree, restoreWorkingTree } from '../repo.js';
@@ -122,8 +125,84 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
   return channel;
 }
 
+/**
+ * `/code chat`, or the Chat with Claude button under the repo picker —
+ * opens a private channel with a plain Claude conversation (no repo).
+ */
+export async function handleCodeChat(interaction, sessionManager) {
+  if (!hasAccess(interaction)) return replyNoAccess(interaction);
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    const channel = await createSessionChannel({
+      guild: interaction.guild,
+      ownerId: interaction.user.id,
+      allowedRoleId: config.discord.allowedRoleId,
+      repoFullName: 'chat',
+      categoryName: CHAT_CATEGORY_NAME,
+    });
+    const session = await sessionManager.createChatSession({
+      channelId: channel.id,
+      guildId: interaction.guildId,
+      ownerId: interaction.user.id,
+    });
+    await channel.send(buildSessionPanel(session));
+    logEvent(interaction.guildId, `💬 ${interaction.user} opened a chat: ${channel}`);
+    await interaction.editReply({
+      content: `✅ Created ${channel}. Say hi!`,
+      components: [buildOpenSessionRow(interaction.guildId, channel.id)],
+    });
+  } catch (err) {
+    console.error(err);
+    await interaction.editReply(`❌ Couldn't start a chat: ${err.message}`.slice(0, 2000));
+  }
+}
+
+/**
+ * `/code set-chat-channel` — posts a permanent Chat with Claude button in a
+ * channel. The button never changes, so unlike the repo picker channel
+ * there's nothing to store or resync on boot.
+ */
+export async function handleSetChatChannel(interaction) {
+  if (!interaction.member?.permissions?.has(PermissionsBitField.Flags.ManageChannels)) {
+    await interaction.reply({ content: 'You need the **Manage Channels** permission to do that.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const channel = interaction.options.getChannel('channel', true);
+  try {
+    await channel.send({
+      content: '💬 **Chat with Claude** — opens a private channel for a plain conversation (no repo). Start as many as you like.',
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(NEW_CHAT_CHANNEL_BUTTON_ID).setLabel('Chat with Claude').setEmoji('💬').setStyle(ButtonStyle.Primary),
+        ),
+      ],
+    });
+    await interaction.reply({ content: `✅ ${channel} now has a Chat with Claude button.`, flags: MessageFlags.Ephemeral });
+  } catch (err) {
+    console.error(err);
+    await interaction.reply({ content: `❌ Couldn't post in ${channel}: ${err.message}`.slice(0, 2000), flags: MessageFlags.Ephemeral });
+  }
+}
+
+/** Replies privately and returns true if `session` is a chat — for repo-only buttons and commands. */
+async function rejectIfChat(interaction, session) {
+  if (!session.isChat) return false;
+  await interaction.reply({ content: "That's only for code sessions — this is a plain chat.", flags: MessageFlags.Ephemeral });
+  return true;
+}
+
 /** The session's welcome message: a short summary plus the control panel (model dropdown, Commit, Show Changes, Close...). */
 function buildSessionPanel(session) {
+  if (session.isChat) {
+    return {
+      content:
+        '💬 **Chat with Claude** — just type. There\'s no repo here, just a conversation.\n' +
+        '-# New Chat forgets the conversation so far · closes after 4h idle · attach images, logs or PDFs',
+      components: buildChatPanelRows({ model: session.model, defaultModel: config.claude.defaultModel }),
+    };
+  }
   const hasProjectNotes = fs.existsSync(path.join(session.dir, 'CLAUDE.md'));
   return {
     content:
@@ -195,11 +274,15 @@ async function runTurn(session, channel, text, sessionManager) {
 
   // Snapshot the files before Claude touches them, for the Undo button.
   // Best-effort: if it fails, the turn still runs, just without Undo.
+  // Chats have no repo (and no file edits), so no Undo.
   const turnId = crypto.randomUUID().slice(0, 8);
-  const beforeTree = await snapshotWorkingTree(session.dir).catch((err) => {
-    console.error(`[session ${session.id}] snapshot before turn failed:`, err.message);
-    return null;
-  });
+  const beforeTree = session.isChat
+    ? null
+    : await snapshotWorkingTree(session.dir).catch((err) => {
+        console.error(`[session ${session.id}] snapshot before turn failed:`, err.message);
+        return null;
+      });
+  const replyRow = () => (session.isChat ? buildChatReplyRow() : buildPostReplyRow());
   // Returns an Undo row if this turn changed any files (and remembers the
   // snapshot so the button can restore it), else null.
   const undoRowIfChanged = async () => {
@@ -253,11 +336,14 @@ async function runTurn(session, channel, text, sessionManager) {
     const undoRow = await undoRowIfChanged();
 
     if (stopped) {
+      const stoppedAt = `⏹️ Stopped${toolCallCount > 0 ? ` after ${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}` : ''}.`;
       await thinking.edit({
-        content: `⏹️ Stopped${toolCallCount > 0 ? ` after ${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}` : ''}. Any file changes made so far are kept${undoRow ? ' — use Undo to roll them back' : ''}.`,
+        content: session.isChat
+          ? stoppedAt
+          : `${stoppedAt} Any file changes made so far are kept${undoRow ? ' — use Undo to roll them back' : ''}.`,
         components: [],
       });
-      await channel.send({ content: 'What next?', components: [buildPostReplyRow(), ...(undoRow ? [undoRow] : [])] });
+      await channel.send({ content: 'What next?', components: [replyRow(), ...(undoRow ? [undoRow] : [])] });
       return;
     }
     if (!result) {
@@ -292,7 +378,7 @@ async function runTurn(session, channel, text, sessionManager) {
     } else {
       await channel.send({
         content: statsLine || 'What next?',
-        components: [buildPostReplyRow(), ...extraRows],
+        components: [replyRow(), ...extraRows],
       });
     }
   } catch (err) {
@@ -369,6 +455,7 @@ export async function handleShowChangesButton(interaction, sessionManager) {
     await interaction.reply({ content: 'No active session in this channel.', flags: MessageFlags.Ephemeral });
     return;
   }
+  if (await rejectIfChat(interaction, session)) return;
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
@@ -407,6 +494,10 @@ export async function handleFreshStartButton(interaction, sessionManager) {
   }
 
   session.resetConversation();
+  if (session.isChat) {
+    await interaction.reply(`🆕 ${interaction.user} started a new chat — Claude has forgotten everything above this line.\n${'─'.repeat(30)}`);
+    return;
+  }
   await interaction.reply(
     `🧹 ${interaction.user} started a fresh conversation. Claude has forgotten the chat so far, but all file changes are kept — ` +
       'your next message starts from scratch (and costs less).',
@@ -427,13 +518,17 @@ export async function handleKeepAliveButton(interaction, sessionManager) {
 /** Posted into the session channel 15 minutes before the idle auto-close (wired up in index.js). */
 export async function sendIdleWarning(channel, session) {
   let lossNote = '';
-  try {
-    const status = await session.git.status();
-    lossNote = status.isClean()
-      ? " There are no uncommitted changes, so nothing will be lost."
-      : ' **Uncommitted changes will be discarded** — click Push Live to keep them.';
-  } catch {
-    // Status is only for the note; the warning itself still matters.
+  if (session.isChat) {
+    lossNote = ' The conversation will be lost.';
+  } else {
+    try {
+      const status = await session.git.status();
+      lossNote = status.isClean()
+        ? " There are no uncommitted changes, so nothing will be lost."
+        : ' **Uncommitted changes will be discarded** — click Push Live to keep them.';
+    } catch {
+      // Status is only for the note; the warning itself still matters.
+    }
   }
   await channel.send({
     content: `⏰ This session has been idle for a while and will auto-close in 15 minutes.${lossNote}`,
@@ -473,6 +568,7 @@ export async function handleCommitButton(interaction, sessionManager) {
     await interaction.reply({ content: 'No active session in this channel.', flags: MessageFlags.Ephemeral });
     return;
   }
+  if (await rejectIfChat(interaction, session)) return;
   if (session.turnActive) {
     await interaction.reply({
       content: "⏳ Claude's still working on a newer message — try Push Live again once it replies.",
@@ -728,7 +824,7 @@ export async function handleCodeStatus(interaction, sessionManager) {
       icon = '💤';
     }
     return [
-      `${icon} **${s.owner}/${s.repo}**`,
+      `${icon} **${s.label}**`,
       `-# <#${s.channelId}> · <@${s.ownerId}>`,
       `-# ${activity}`,
       `-# Model: ${modelLabel(s.model)} · Cost so far ~$${s.totalCostUsd.toFixed(2)}`,
@@ -823,6 +919,7 @@ export async function handleCodeInit(interaction, sessionManager) {
     await interaction.reply({ content: 'Run this inside an active Claude Code session channel.', flags: MessageFlags.Ephemeral });
     return;
   }
+  if (await rejectIfChat(interaction, session)) return;
   if (session.turnActive) {
     await interaction.reply({ content: "⏳ Claude's still working — try again once it replies.", flags: MessageFlags.Ephemeral });
     return;
@@ -862,9 +959,13 @@ export async function handleExitButton(interaction, sessionManager) {
 
 /** Shared by the inline Exit button and the /code close Exit button. */
 async function closeWithoutCommitting(channel, session, sessionManager) {
-  await channel.send('👋 Closing without committing...');
+  if (!session.isChat) await channel.send('👋 Closing without committing...');
   await sessionManager.close(session);
-  await channel.send('Closed — nothing was committed. This channel will be removed shortly.');
+  await channel.send(
+    session.isChat
+      ? '👋 Chat closed. This channel will be removed shortly.'
+      : 'Closed — nothing was committed. This channel will be removed shortly.',
+  );
   await deleteChannelSoon(channel);
 }
 
@@ -908,6 +1009,16 @@ export async function handleCodeClose(interaction, sessionManager) {
     });
     return;
   }
+  // Nothing to push in a chat, so skip the Push / Exit question.
+  if (session.isChat) {
+    if (session.turnActive) {
+      await interaction.reply({ content: "⏳ Claude's still replying — try again once it's done.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply(`👋 ${interaction.user} closed this chat.`);
+    await closeWithoutCommitting(interaction.channel, session, sessionManager);
+    return;
+  }
 
   await interaction.reply({
     content:
@@ -929,6 +1040,7 @@ export async function handleClosePushButton(interaction, sessionManager) {
     await interaction.update({ content: 'This session is already closed.', components: [] });
     return;
   }
+  if (await rejectIfChat(interaction, session)) return;
   if (session.turnActive) {
     await interaction.reply({
       content: "⏳ Claude's still working on a message — try again once it replies.",
@@ -1011,4 +1123,5 @@ export {
   PANEL_COMMIT_BUTTON_ID,
   PANEL_CLOSE_BUTTON_ID,
   PANEL_INIT_BUTTON_ID,
+  NEW_CHAT_CHANNEL_BUTTON_ID,
 };
