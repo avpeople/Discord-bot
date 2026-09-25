@@ -768,7 +768,7 @@ function describeLastDeploy(lastDeploy) {
       return `Last deploy cancelled ${when}`;
     case 'queued':
     case 'in_progress':
-      return `🔨 Deploying now (started ${when})`;
+      return `Deploying now (started ${when})`;
     default:
       return `Last deploy ${when}`;
   }
@@ -802,11 +802,15 @@ export async function handleCoolifyStatus(interaction) {
     }
     const items = labelCoolifyResources(resources).map((r) => {
       const deployFailed = r.lastDeploy?.status === 'failed';
+      const deploying = r.lastDeploy?.status === 'queued' || r.lastDeploy?.status === 'in_progress';
+      let icon = coolifyStatusIcon(r.status);
       // A failed last deploy means the old version is still running — worth flagging even if it's up.
-      return { ...r, deployFailed, icon: deployFailed && coolifyStatusIcon(r.status) === '🟢' ? '🟡' : coolifyStatusIcon(r.status) };
+      if (deployFailed && icon === '🟢') icon = '🟡';
+      // Mid-deploy, the hammer takes the status circle's place (the problem check below uses the real status).
+      return { ...r, deployFailed, statusIcon: icon, icon: deploying ? '🔨' : icon };
     });
     const byName = (a, b) => a.label.localeCompare(b.label);
-    const problems = items.filter((r) => (r.status && r.icon !== '🟢') || r.deployFailed).sort(byName);
+    const problems = items.filter((r) => (r.status && r.statusIcon !== '🟢') || r.deployFailed).sort(byName);
     const fine = items.filter((r) => !problems.includes(r));
     // Name on the first line, then each detail on its own line in Discord's small grey subtext (`-# `).
     const line = (r) => {
@@ -815,7 +819,8 @@ export async function handleCoolifyStatus(interaction) {
     };
     // Discord messages don't render Markdown horizontal rules, so a run of box-drawing characters stands in.
     const divider = '─'.repeat(28);
-    const list = (group) => group.map(line).join(`\n${divider}\n`);
+    // Lines above, between and below the items, so each one sits in its own box.
+    const list = (group) => `${divider}\n${group.map(line).join(`\n${divider}\n`)}\n${divider}`;
 
     const sections = [
       problems.length > 0
