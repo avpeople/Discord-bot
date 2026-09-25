@@ -58,9 +58,16 @@ export async function findApplications(owner, repo, branch) {
   );
 }
 
-async function listDeployments(appUuid) {
-  const data = await api(`/deployments/applications/${encodeURIComponent(appUuid)}?skip=0&take=10`);
+async function listDeployments(appUuid, take = 10) {
+  const data = await api(`/deployments/applications/${encodeURIComponent(appUuid)}?skip=0&take=${take}`);
   return Array.isArray(data) ? data : data.deployments ?? data.data ?? [];
+}
+
+/** Coolify timestamps can carry microseconds ('…:00.000000Z'); trim to milliseconds so Date parses them everywhere. */
+function parseTime(value) {
+  if (!value) return null;
+  const ms = Date.parse(String(value).replace(/(\.\d{3})\d+/, '$1'));
+  return Number.isNaN(ms) ? null : ms;
 }
 
 /** Last few visible log lines of a deployment, for a failure message. Best-effort — '' if unavailable. */
@@ -82,19 +89,38 @@ export async function deploymentLogTail(deploymentUuid, lines = 15) {
 const asList = (data) => (Array.isArray(data) ? data : data?.data ?? []);
 
 /**
- * Everything Coolify runs, with its current status: `[{ kind, name, status }]`
- * where kind is 'app', 'database' or 'service' and status is Coolify's raw
- * string (e.g. 'running:healthy', 'exited:unhealthy') or null if the API
- * didn't include one — documented for applications; databases and
- * services are best-effort since their list responses aren't documented.
- * A kind whose endpoint fails is skipped rather than failing the whole list.
+ * Everything Coolify runs, with its current status:
+ * `[{ kind, name, uuid, status, lastDeploy }]` where kind is 'app',
+ * 'database' or 'service' and status is Coolify's raw string (e.g.
+ * 'running:healthy', 'exited:unhealthy') or null if the API didn't include
+ * one — documented for applications; databases and services are
+ * best-effort since their list responses aren't documented. Apps also get
+ * `lastDeploy: { at, status }` from their most recent deployment (`at` in
+ * ms — when it finished, or started if it's still going), or null. A kind
+ * or deployment lookup that fails is left out rather than failing the list.
  */
 export async function listResources() {
   const [apps, databases, services] = await Promise.all(
     ['/applications', '/databases', '/services'].map((p) => api(p).then(asList).catch(() => [])),
   );
-  const toResource = (kind) => (r) => ({ kind, name: r.name ?? r.uuid, status: r.status ?? null });
-  return [...apps.map(toResource('app')), ...databases.map(toResource('database')), ...services.map(toResource('service'))];
+  const toResource = (kind) => (r) => ({ kind, name: r.name ?? r.uuid, uuid: r.uuid ?? null, status: r.status ?? null, lastDeploy: null });
+
+  const appResources = await Promise.all(
+    apps.map(async (app) => {
+      const resource = toResource('app')(app);
+      if (!app.uuid) return resource;
+      const [latest] = await listDeployments(app.uuid, 1).catch(() => []);
+      if (latest) {
+        const done = DONE_STATUSES.has(latest.status);
+        resource.lastDeploy = {
+          at: parseTime(done ? latest.updated_at ?? latest.created_at : latest.created_at),
+          status: latest.status,
+        };
+      }
+      return resource;
+    }),
+  );
+  return [...appResources, ...databases.map(toResource('database')), ...services.map(toResource('service'))];
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

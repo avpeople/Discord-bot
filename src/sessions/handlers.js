@@ -715,6 +715,66 @@ function coolifyStatusIcon(status) {
 }
 
 /**
+ * Readable labels for Coolify resources. Coolify names things like
+ * 'live.nz:main-u14d84x6bi7xactgxnmlk87d' (name:branch-uuid) or
+ * 'postgresql-database-vktj5awb3hjtynjlasr0uhya' (name-uuid): the random
+ * id is dropped and the branch shown separately -> '**live.nz** · `main`'.
+ * If two labels still collide (e.g. two 'postgresql-database'), each gets
+ * the first 4 characters of its id to tell them apart.
+ */
+function labelCoolifyResources(resources) {
+  const parsed = resources.map((r) => {
+    let name = String(r.name);
+    if (r.uuid) name = name.replace(new RegExp(`-?${r.uuid}$`), '');
+    name = name.replace(/-[a-z0-9]{20,}$/, ''); // any id Coolify appended without uuid matching exactly
+    const [base, branch] = name.split(':');
+    return { ...r, base: base || name, branch: branch || null };
+  });
+  const key = (p) => `${p.kind}|${p.base}|${p.branch}`;
+  const counts = new Map();
+  for (const p of parsed) counts.set(key(p), (counts.get(key(p)) ?? 0) + 1);
+  return parsed.map((p) => {
+    const shortId = counts.get(key(p)) > 1 && p.uuid ? ` _(${p.uuid.slice(0, 4)})_` : '';
+    return { ...p, label: `**${p.base}**${p.branch ? ` · \`${p.branch}\`` : ''}${shortId}` };
+  });
+}
+
+/** 'running:healthy' -> 'healthy', 'running:unknown' -> 'running' (no health check), 'exited:unhealthy' -> 'stopped'. */
+function friendlyCoolifyStatus(status) {
+  if (!status) return 'no status reported';
+  const [state = '', health = ''] = String(status).toLowerCase().split(/[:()\s]+/);
+  if (state.startsWith('running')) return health === 'healthy' ? 'healthy' : health === 'unhealthy' ? 'running but unhealthy' : 'running';
+  if (state.startsWith('exited') || state.startsWith('stopped') || state.startsWith('dead')) return 'stopped';
+  if (state.startsWith('restarting')) return 'restarting';
+  if (state.startsWith('starting')) return 'starting';
+  if (state.startsWith('degraded')) return 'degraded (some containers down)';
+  return state || status;
+}
+
+/**
+ * 'Deployed 2 hours ago' (a Discord relative timestamp, which keeps itself
+ * up to date in the client), or a note if the latest deploy failed or is
+ * still running. '' for things with no deploys (e.g. databases).
+ */
+function describeLastDeploy(lastDeploy) {
+  if (!lastDeploy?.at) return '';
+  const when = `<t:${Math.floor(lastDeploy.at / 1000)}:R>`;
+  switch (lastDeploy.status) {
+    case 'finished':
+      return `Deployed ${when}`;
+    case 'failed':
+      return `❌ Last deploy failed ${when}`;
+    case 'cancelled-by-user':
+      return `Last deploy cancelled ${when}`;
+    case 'queued':
+    case 'in_progress':
+      return `🔨 Deploying now (started ${when})`;
+    default:
+      return `Last deploy ${when}`;
+  }
+}
+
+/**
  * Server Status button under the repo picker — everything Coolify runs,
  * with anything stopped, unhealthy or restarting listed first.
  */
@@ -740,21 +800,32 @@ export async function handleCoolifyStatus(interaction) {
       await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, "Coolify didn't return anything — check the API token's permissions.");
       return;
     }
-    const withIcon = resources.map((r) => ({ ...r, icon: coolifyStatusIcon(r.status) }));
-    const problems = withIcon.filter((r) => r.icon !== '🟢' && r.status);
-    const healthy = withIcon.filter((r) => r.icon === '🟢');
-    const unknown = withIcon.filter((r) => !r.status);
-    const kindLabel = { app: '', database: ' _(database)_', service: ' _(service)_' };
-    const line = (r) => `${r.icon} **${r.name}**${kindLabel[r.kind]}${r.status ? ` — \`${r.status}\`` : ''}`;
+    const items = labelCoolifyResources(resources).map((r) => {
+      const deployFailed = r.lastDeploy?.status === 'failed';
+      // A failed last deploy means the old version is still running — worth flagging even if it's up.
+      return { ...r, deployFailed, icon: deployFailed && coolifyStatusIcon(r.status) === '🟢' ? '🟡' : coolifyStatusIcon(r.status) };
+    });
+    const byName = (a, b) => a.label.localeCompare(b.label);
+    const problems = items.filter((r) => (r.status && r.icon !== '🟢') || r.deployFailed).sort(byName);
+    const fine = items.filter((r) => !problems.includes(r));
+    // Name on the first line, then each detail on its own line in Discord's small grey subtext (`-# `).
+    const line = (r) => {
+      const deploy = describeLastDeploy(r.lastDeploy);
+      return [`${r.icon} ${r.label}`, `-# Status: ${friendlyCoolifyStatus(r.status)}`, ...(deploy ? [`-# ${deploy}`] : [])].join('\n');
+    };
+    // Discord messages don't render Markdown horizontal rules, so a run of box-drawing characters stands in.
+    const divider = '─'.repeat(28);
+    const list = (group) => group.map(line).join(`\n${divider}\n`);
 
-    const sections = [];
-    sections.push(
+    const sections = [
       problems.length > 0
-        ? `**⚠️ ${problems.length} need${problems.length === 1 ? 's' : ''} attention**\n${problems.map(line).join('\n')}`
-        : '**✅ Everything is running**',
-    );
-    if (healthy.length > 0) sections.push(`**Running (${healthy.length})**\n${healthy.map(line).join('\n')}`);
-    if (unknown.length > 0) sections.push(`**No status reported (${unknown.length})**\n${unknown.map(line).join('\n')}`);
+        ? `### ⚠️ ${problems.length} need${problems.length === 1 ? 's' : ''} attention\n${list(problems)}`
+        : '### ✅ Everything is running',
+    ];
+    for (const [kind, heading] of [['app', 'Apps'], ['database', 'Databases'], ['service', 'Services']]) {
+      const group = fine.filter((r) => r.kind === kind).sort(byName);
+      if (group.length > 0) sections.push(`**${heading}**\n${list(group)}`);
+    }
     await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, sections.join('\n\n'));
   } catch (err) {
     console.error('Coolify status failed:', err);
