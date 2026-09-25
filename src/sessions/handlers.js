@@ -128,7 +128,7 @@ function buildSessionPanel(session) {
   return {
     content:
       `👋 **${session.owner}/${session.repo}** — just type what you want changed.\n` +
-      `-# Commit merges into \`${session.defaultBranch}\` · closes after 4h idle · attach images, logs or PDFs` +
+      `-# Push Live merges into \`${session.defaultBranch}\` and deploys · closes after 4h idle · attach images, logs or PDFs` +
       (hasProjectNotes ? '' : '\n-# 📝 No project notes yet — Project Notes has Claude write a CLAUDE.md, which saves tokens later'),
     components: buildSessionPanelRows({ model: session.model, hasProjectNotes, defaultModel: config.claude.defaultModel }),
   };
@@ -380,7 +380,7 @@ export async function handleShowChangesButton(interaction, sessionManager) {
     const list = files.length > 1500 ? `${files.slice(0, 1500)}\n…` : files;
     await interaction.editReply({
       content:
-        `**Changes Commit would include**${stat ? ` — ${stat}` : ''}\n` +
+        `**Changes Push Live would include**${stat ? ` — ${stat}` : ''}\n` +
         `\`\`\`\n${list}\n\`\`\`` +
         '_M = modified, A = new, D = deleted. Full diff attached._',
       files: [new AttachmentBuilder(Buffer.from(patch), { name: 'changes.diff' })],
@@ -431,7 +431,7 @@ export async function sendIdleWarning(channel, session) {
     const status = await session.git.status();
     lossNote = status.isClean()
       ? " There are no uncommitted changes, so nothing will be lost."
-      : ' **Uncommitted changes will be discarded** — click Commit on a recent reply to keep them.';
+      : ' **Uncommitted changes will be discarded** — click Push Live to keep them.';
   } catch {
     // Status is only for the note; the warning itself still matters.
   }
@@ -476,7 +476,7 @@ export async function handleCommitButton(interaction, sessionManager) {
   }
   if (session.turnActive) {
     await interaction.reply({
-      content: "⏳ Claude's still working on a newer message — try Commit again once it replies.",
+      content: "⏳ Claude's still working on a newer message — try Push Live again once it replies.",
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -484,7 +484,7 @@ export async function handleCommitButton(interaction, sessionManager) {
 
   if (interaction.customId === PANEL_COMMIT_BUTTON_ID) {
     // From the session panel: leave the panel's buttons alone, just acknowledge.
-    await interaction.reply(`📦 ${interaction.user} is committing...`);
+    await interaction.reply(`🚀 ${interaction.user} is pushing live...`);
   } else {
     await interaction.update({ components: [buildPostReplyRow({ used: 'commit' })] });
   }
@@ -492,11 +492,11 @@ export async function handleCommitButton(interaction, sessionManager) {
     const mergeStartedAt = Date.now();
     const outcome = await sessionManager.commitAndMerge(session);
     if (!outcome) {
-      await interaction.followUp('Nothing to commit — no changes since last commit.');
+      await interaction.followUp('Nothing to push — no changes since the last Push Live.');
       return;
     }
     await interaction.followUp({
-      content: `✅ Committed and merged **${outcome.pr.html_url}** into \`${session.defaultBranch}\`.`,
+      content: `✅ Pushed live — merged **${outcome.pr.html_url}** into \`${session.defaultBranch}\`.`,
       components: [buildRevertRow(outcome.pr.number)],
     });
     logEvent(
@@ -506,7 +506,7 @@ export async function handleCommitButton(interaction, sessionManager) {
     followDeploy(session, interaction.channel, { sha: outcome.merged.sha, since: mergeStartedAt });
   } catch (err) {
     console.error(err);
-    await interaction.followUp(`❌ Commit failed: ${err.message}`.slice(0, 2000));
+    await interaction.followUp(`❌ Push Live failed: ${err.message}`.slice(0, 2000));
   }
 }
 
@@ -594,7 +594,7 @@ export async function handleUndoButton(interaction, sessionManager) {
   const turnId = interaction.customId.slice(UNDO_BUTTON_PREFIX.length);
   if (session.undoSnapshot?.turnId !== turnId) {
     await interaction.reply({
-      content: 'Only the most recent reply that changed files can be undone — and not after a Commit.',
+      content: 'Only the most recent reply that changed files can be undone — and not after a Push Live.',
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -659,7 +659,7 @@ export async function handleRevertConfirmButton(interaction, sessionManager) {
         (synced
           ? ' The session has moved onto the reverted code.'
           : '\n⚠️ This session has uncommitted changes, so its files were left as they are — they still include the reverted change. ' +
-            'Commit or Exit, then start a new session to work from the reverted code.'),
+            'Push Live or Exit, then start a new session to work from the reverted code.'),
     );
     logEvent(interaction.guildId, `⏪ ${interaction.user} reverted #${pullNumber} on **${session.owner}/${session.repo}**: ${revertPr.url}`);
     followDeploy(session, interaction.channel, { sha: merged.sha, since: mergeStartedAt });
@@ -890,7 +890,7 @@ const INIT_PROMPT = `Create a CLAUDE.md file at the repo root (or improve the ex
 - Project layout: the key directories/files and what lives where
 - Conventions (code style, naming, patterns to follow) and gotchas/pitfalls
 - How it's deployed, if that's visible from the repo
-Keep it under about 100 lines and skimmable. Don't commit — the user commits with the Commit button.`;
+Keep it under about 100 lines and skimmable. Don't commit — the user saves it with the Push Live button.`;
 
 /** `/code init` — asks Claude to write (or refresh) the repo's CLAUDE.md project notes. */
 export async function handleCodeInit(interaction, sessionManager) {
@@ -909,7 +909,7 @@ export async function handleCodeInit(interaction, sessionManager) {
   const exists = fs.existsSync(path.join(session.dir, 'CLAUDE.md'));
   await interaction.reply(
     `📝 ${interaction.user} asked Claude to ${exists ? 'update' : 'write'} \`CLAUDE.md\` project notes. ` +
-      'Click **Commit** afterwards to save them to the repo.',
+      'Click **Push Live** afterwards to save them to the repo.',
   );
   await runTurn(session, interaction.channel, INIT_PROMPT, sessionManager);
 }
@@ -1015,7 +1015,7 @@ export async function handleClosePushButton(interaction, sessionManager) {
     return;
   }
 
-  await interaction.update({ content: '📦 Committing and closing...', components: [] });
+  await interaction.update({ content: '🚀 Pushing live and closing...', components: [] });
   try {
     const mergeStartedAt = Date.now();
     const outcome = await sessionManager.commitAndMerge(session, `Claude Code session ${session.id} (final)`);
@@ -1031,7 +1031,7 @@ export async function handleClosePushButton(interaction, sessionManager) {
 
     await interaction.channel.send(
       outcome
-        ? `✅ Committed and merged **${outcome.pr.html_url}**. This channel will be removed shortly.`
+        ? `✅ Pushed live — merged **${outcome.pr.html_url}**. This channel will be removed shortly.`
         : '✅ Closed — nothing to commit. This channel will be removed shortly.',
     );
     await deleteChannelSoon(interaction.channel);

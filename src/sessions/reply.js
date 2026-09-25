@@ -57,7 +57,7 @@ export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) 
     );
 
   const buttons = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Commit').setEmoji('📦').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setEmoji('📄').setStyle(ButtonStyle.Secondary),
   );
   if (!hasProjectNotes) {
@@ -215,7 +215,7 @@ export function buildPostReplyRow({ used } = {}) {
 
   if (used === 'commit') {
     row.addComponents(
-      new ButtonBuilder().setCustomId('noop:committed').setLabel('Committed ✓').setStyle(ButtonStyle.Success).setDisabled(true),
+      new ButtonBuilder().setCustomId('noop:committed').setLabel('Pushed Live ✓').setStyle(ButtonStyle.Success).setDisabled(true),
     );
   } else if (used === 'keep-going') {
     row.addComponents(
@@ -223,7 +223,7 @@ export function buildPostReplyRow({ used } = {}) {
     );
   } else {
     row.addComponents(
-      new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(KEEP_GOING_BUTTON_ID).setLabel('Keep Going').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('Fresh Start').setStyle(ButtonStyle.Secondary),
