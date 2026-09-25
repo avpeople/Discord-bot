@@ -16,6 +16,14 @@ const commands = [
         .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
     )
     .addSubcommand((sub) =>
+      sub.setName('status').setDescription('List all open sessions: repo, owner, idle time, model and cost so far'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('init')
+        .setDescription("Have Claude write CLAUDE.md project notes for this session's repo (saves tokens later)"),
+    )
+    .addSubcommand((sub) =>
       sub
         .setName('model')
         .setDescription("Switch this session's Claude model (Sonnet is much cheaper than Opus)")

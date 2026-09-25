@@ -26,6 +26,30 @@ export async function mergePullRequest({ owner, repo, pullNumber }) {
   return data;
 }
 
+/**
+ * Opens a PR that reverts a merged PR — the same thing as GitHub's "Revert"
+ * button, via its GraphQL `revertPullRequest` mutation (there's no REST
+ * equivalent). GitHub creates the revert branch itself. Throws if GitHub
+ * can't revert it cleanly (e.g. later changes touched the same lines).
+ * Returns `{ number, url, headRefName }` of the new PR.
+ */
+export async function openRevertPullRequest({ owner, repo, pullNumber }) {
+  const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+  const result = await octokit.graphql(
+    `mutation($id: ID!, $title: String!, $body: String!) {
+      revertPullRequest(input: { pullRequestId: $id, title: $title, body: $body }) {
+        revertPullRequest { number url headRefName }
+      }
+    }`,
+    {
+      id: pr.node_id,
+      title: `Revert "${pr.title}"`,
+      body: `Reverts #${pullNumber}, requested from the Claude Code Discord session.`,
+    },
+  );
+  return result.revertPullRequest.revertPullRequest;
+}
+
 /** Deletes a branch on the remote (used to clean up after an auto-merge). */
 export async function deleteBranch({ owner, repo, branch }) {
   await octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` }).catch((err) => {

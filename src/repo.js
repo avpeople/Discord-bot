@@ -80,6 +80,52 @@ export async function pendingChanges(git) {
   return { files: files.trim(), stat: stat.trim(), patch };
 }
 
+/**
+ * Records the working directory's current state (tracked + untracked,
+ * respecting .gitignore) as a git tree object and returns its hash, without
+ * touching the real index, HEAD or any branch — a scratch index file is
+ * used instead. Used before each Claude turn so Undo can put files back.
+ */
+export async function snapshotWorkingTree(dir) {
+  const git = scratchIndexGit(dir);
+  await git.raw(['read-tree', 'HEAD']); // start from HEAD so `add` only has to hash what changed
+  await git.raw(['add', '-A']);
+  return (await git.raw(['write-tree'])).trim();
+}
+
+/**
+ * Puts the working directory back to a snapshotWorkingTree() state:
+ * restores every file in the snapshot and deletes files created since
+ * (ignored files, e.g. node_modules, are left alone). The real index is
+ * reset to HEAD afterwards so no stale staged entries linger.
+ */
+export async function restoreWorkingTree(dir, tree) {
+  const git = scratchIndexGit(dir);
+  await git.raw(['read-tree', tree]);
+  await git.raw(['checkout-index', '-a', '-f']);
+
+  const inSnapshot = new Set((await git.raw(['ls-tree', '-r', '--name-only', '-z', tree])).split('\0').filter(Boolean));
+  const current = (await simpleGit(dir).raw(['ls-files', '-z', '--cached', '--others', '--exclude-standard']))
+    .split('\0')
+    .filter(Boolean);
+  for (const file of current) {
+    if (!inSnapshot.has(file)) fs.rmSync(path.join(dir, file), { force: true });
+  }
+  await simpleGit(dir).raw(['reset', '-q']);
+}
+
+function scratchIndexGit(dir) {
+  // simple-git refuses to run with some inherited GIT_* variables set (e.g.
+  // GIT_EDITOR, as a safety check), so pass the environment without them.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  return simpleGit(dir).env({ ...env, GIT_INDEX_FILE: path.join(dir, '.git', 'claude-snapshot-index') });
+}
+
+/** True if the working directory has no uncommitted changes (tracked or untracked). */
+export async function isWorkingTreeClean(git) {
+  return (await git.status()).isClean();
+}
+
 /** Discards all uncommitted working-directory changes (used on idle timeout). */
 export async function discardPendingChanges(git) {
   await git.reset(['--hard']);

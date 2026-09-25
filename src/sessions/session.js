@@ -62,6 +62,7 @@ export class Session {
     commitCount = 0,
     model = null,
     totalCostUsd = 0,
+    createdAt = Date.now(),
   }) {
     this.id = id;
     this.channelId = channelId;
@@ -93,6 +94,15 @@ export class Session {
     this.closed = false;
     this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
     this.queuedMessages = []; // user messages sent while busy, run together as the next turn
+    this.createdAt = createdAt;
+    this.lastActivityAt = Date.now(); // for /code status
+    // { turnId, tree } — working-tree snapshot from just before the latest
+    // turn that changed files, for the Undo button (see repo.js). Cleared
+    // once used, or on Commit (the snapshot is relative to the old branch).
+    this.undoSnapshot = null;
+    // Prepended to the next message sent to Claude, e.g. to tell it an Undo
+    // reverted its last changes so it doesn't trust its memory of the files.
+    this.pendingNote = null;
 
     this._child = null; // the in-flight `claude` process, if any (for stop())
     this._stopRequested = false;
@@ -122,6 +132,7 @@ export class Session {
       commitCount: this.commitCount,
       model: this.model,
       totalCostUsd: this.totalCostUsd,
+      createdAt: this.createdAt,
     };
   }
 
@@ -267,6 +278,7 @@ export class Session {
   }
 
   _touchIdleTimer() {
+    this.lastActivityAt = Date.now();
     if (this._idleTimer) clearTimeout(this._idleTimer);
     if (this._idleWarningTimer) clearTimeout(this._idleWarningTimer);
     this._idleWarningTimer = setTimeout(() => {

@@ -7,8 +7,9 @@ import {
   discardPendingChanges,
   cleanupRepoDir,
   rebranchFromDefault,
+  isWorkingTreeClean,
 } from '../repo.js';
-import { openPullRequest, mergePullRequest, deleteBranch } from '../github.js';
+import { openPullRequest, mergePullRequest, deleteBranch, openRevertPullRequest } from '../github.js';
 import { Session } from './session.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
 import { cleanupUploadsDir } from './attachments.js';
@@ -67,6 +68,10 @@ export class SessionManager {
 
   getByChannel(channelId) {
     return this.sessionsByChannel.get(channelId);
+  }
+
+  listSessions() {
+    return Array.from(this.sessionsByChannel.values());
   }
 
   generateSessionId() {
@@ -145,13 +150,39 @@ export class SessionManager {
 
     await deleteBranch({ owner: session.owner, repo: session.repo, branch: session.branchName });
 
+    session.undoSnapshot = null; // relative to the old branch — restoring it now would fight the merge
+    await this._rebranch(session);
+    return { pr, merged };
+  }
+
+  /** Moves the session onto a fresh branch off the (freshly pulled) default branch. */
+  async _rebranch(session) {
     session.commitCount += 1;
     const nextBranch = `claude/session-${session.id}-${session.commitCount}`;
     await rebranchFromDefault(session.git, session.defaultBranch, nextBranch);
     session.branchName = nextBranch;
     this._persist();
+  }
 
-    return { pr, merged };
+  /**
+   * Reverts a PR this session merged: opens GitHub's revert PR, merges it
+   * and deletes its branch. If the session has no uncommitted work, its
+   * checkout is then moved onto the updated default branch so Claude sees
+   * the reverted code; otherwise it's left alone (returned as
+   * `synced: false`) so nothing is lost.
+   */
+  async revertMergedPullRequest(session, pullNumber) {
+    const revertPr = await openRevertPullRequest({ owner: session.owner, repo: session.repo, pullNumber });
+    const merged = await mergePullRequest({ owner: session.owner, repo: session.repo, pullNumber: revertPr.number });
+    await deleteBranch({ owner: session.owner, repo: session.repo, branch: revertPr.headRefName });
+
+    let synced = false;
+    if (await isWorkingTreeClean(session.git)) {
+      session.undoSnapshot = null;
+      await this._rebranch(session);
+      synced = true;
+    }
+    return { revertPr, merged, synced };
   }
 
   /**

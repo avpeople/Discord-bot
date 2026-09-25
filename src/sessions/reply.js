@@ -11,6 +11,9 @@ export const STOP_BUTTON_ID = 'claude-session:stop';
 export const SHOW_CHANGES_BUTTON_ID = 'claude-session:show-changes';
 export const FRESH_START_BUTTON_ID = 'claude-session:fresh-start';
 export const KEEP_ALIVE_BUTTON_ID = 'claude-session:keep-alive';
+export const UNDO_BUTTON_PREFIX = 'claude-session:undo:'; // + turn id
+export const REVERT_BUTTON_PREFIX = 'claude-session:revert:'; // + PR number
+export const REVERT_CONFIRM_PREFIX = 'claude-session:revert-confirm:'; // + PR number
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
@@ -172,6 +175,43 @@ export function buildPostReplyRow({ used } = {}) {
 
   row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
   return row;
+}
+
+/**
+ * Second row under a reply that changed files: Undo puts those files back
+ * as they were before this reply (see repo.js snapshotWorkingTree). Only
+ * the latest such reply can be undone — the handler checks the turn id.
+ */
+export function buildUndoRow(turnId, { used = false } = {}) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(used ? `noop:undone:${turnId}` : `${UNDO_BUTTON_PREFIX}${turnId}`)
+      .setLabel(used ? 'Undone ✓' : "Undo This Reply's Changes")
+      .setEmoji('↩️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(used),
+  );
+}
+
+/** Revert button on the "Committed and merged" message — undoes that merge on GitHub (asks to confirm first). */
+export function buildRevertRow(pullNumber, { used = false } = {}) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(used ? `noop:reverted:${pullNumber}` : `${REVERT_BUTTON_PREFIX}${pullNumber}`)
+      .setLabel(used ? 'Reverted ✓' : 'Revert This Merge')
+      .setEmoji('⏪')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(used),
+  );
+}
+
+export function buildRevertConfirmRow(pullNumber) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${REVERT_CONFIRM_PREFIX}${pullNumber}`)
+      .setLabel(`Yes, revert #${pullNumber}`)
+      .setStyle(ButtonStyle.Danger),
+  );
 }
 
 /** The Stop button on the live "Thinking..." message while a turn runs. */

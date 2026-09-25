@@ -18,7 +18,11 @@ services:
       GITHUB_COMMIT_EMAIL: ${GITHUB_COMMIT_EMAIL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       CLAUDE_CONFIG_DIR: /data/claude-config
+      CLAUDE_MODEL: ${CLAUDE_MODEL}
       WORKSPACE_DIR: /data/workspaces
+      # Coolify API (optional) — posts deploy progress after Commit merges
+      COOLIFY_URL: ${COOLIFY_URL}
+      COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN}
       # Voice bridge (optional) — was missing from this file entirely before,
       # so setting these in Coolify's UI alone never actually reached the
       # container (Coolify only passes through what's referenced here).

@@ -55,6 +55,14 @@ trust to make that call.
    - **Fresh Start** clears Claude's conversation history (files are
      kept). Every message resends the whole conversation, so long chats
      get steadily more expensive — this resets that.
+   - **↩️ Undo This Reply's Changes** (a second row, only under replies
+     that changed files) puts the files back exactly as they were before
+     that reply — edits reverted, new files removed, deleted files
+     restored; ignored files like `node_modules` are left alone. Only the
+     latest such reply can be undone, and not after a Commit. The bot
+     snapshots the working tree into a scratch git index before each turn
+     (`snapshotWorkingTree` in [src/repo.js](src/repo.js)), and tells
+     Claude on the next message that its changes were undone.
    - **Exit** closes the session (discarding anything not already
      committed) and removes the channel. Unlike Commit/Keep Going, Exit
      stays live on every past reply — not just the newest — so you can
@@ -76,7 +84,17 @@ trust to make that call.
 8. Idle 4 hours with no messages → pending changes are discarded and the
    session auto-closes, same as Exit. A warning with a **Keep Alive**
    button is posted 15 minutes before.
-9. `/code model` switches the session between Sonnet, Opus and Haiku
+9. After Commit merges, the message has a **⏪ Revert This Merge**
+   button: after a confirm, it opens GitHub's revert PR for that merge and
+   merges it. If Coolify is configured (see below), the bot also follows
+   the deploy each merge triggers and posts its progress and result —
+   with the last log lines if it failed.
+10. `/code status` lists every open session (repo, owner, idle time,
+   model, cost so far). `/code init` has Claude write a `CLAUDE.md` of
+   project notes for the repo — Claude Code reads it at the start of
+   every session instead of re-exploring the project; the welcome message
+   suggests it when a repo doesn't have one.
+11. `/code model` switches the session between Sonnet, Opus and Haiku
    (Sonnet is much cheaper than Opus). `CLAUDE_MODEL` in `.env` sets the
    default for new sessions.
 
@@ -103,6 +121,20 @@ there's just a dropdown waiting, no need to run `/code new` each time.
 - Only one picker channel per server. Running the command again in a
   different channel moves it there; the old channel keeps whatever its
   last message was (nothing un-sets it automatically).
+
+## Deploy updates from Coolify (optional)
+
+Set `COOLIFY_URL` and `COOLIFY_API_TOKEN` (create the token in Coolify
+under **Keys & Tokens → API tokens**; read access is enough). After a
+Commit, Push-then-close or Revert merges, the bot finds the Coolify
+app(s) deploying that repo's default branch (matching `git_repository` +
+`git_branch`), follows the deploy triggered by the merge, and edits a
+message in the session channel as it goes: queued → building → ✅
+deployed / ❌ failed (with the log tail). Results also go to the activity
+log. It gives up if no deploy starts within 3 minutes (auto-deploy off)
+or it runs past 30. From inside a Coolify-deployed container
+`http://coolify:8080` usually reaches Coolify; otherwise use the
+dashboard's URL. See [src/coolify.js](src/coolify.js).
 
 ## Activity log (optional)
 

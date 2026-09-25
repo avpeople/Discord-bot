@@ -32,6 +32,14 @@ export const config = {
   welcomeStatePath: process.env.WELCOME_STATE_PATH || '/data/claude-config/discord-welcome.json',
   pickerChannelStatePath: process.env.PICKER_CHANNEL_STATE_PATH || '/data/claude-config/discord-picker-channel.json',
   logChannelStatePath: process.env.LOG_CHANNEL_STATE_PATH || '/data/claude-config/discord-log-channel.json',
+  // Optional: Coolify API, used to post deploy progress into a session
+  // channel after Commit merges (see src/coolify.js). Disabled if unset.
+  // From inside a Coolify-deployed container, http://coolify:8080 usually
+  // works; otherwise use the dashboard's public URL.
+  coolify: {
+    url: process.env.COOLIFY_URL || null,
+    apiToken: process.env.COOLIFY_API_TOKEN || null,
+  },
   // Optional: the bridge-discord control API (see the Coms server repo's
   // bridge-discord/README.md). /voice is disabled entirely if unset.
   bridgeDiscord: {

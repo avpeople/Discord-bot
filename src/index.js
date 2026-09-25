@@ -18,6 +18,11 @@ import {
   handleFreshStartButton,
   handleKeepAliveButton,
   handleCodeModel,
+  handleCodeStatus,
+  handleCodeInit,
+  handleUndoButton,
+  handleRevertButton,
+  handleRevertConfirmButton,
   sendIdleWarning,
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
@@ -30,6 +35,9 @@ import {
   SHOW_CHANGES_BUTTON_ID,
   FRESH_START_BUTTON_ID,
   KEEP_ALIVE_BUTTON_ID,
+  UNDO_BUTTON_PREFIX,
+  REVERT_BUTTON_PREFIX,
+  REVERT_CONFIRM_PREFIX,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -129,6 +137,8 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'new') return handleCodeNew(interaction);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
       if (sub === 'model') return handleCodeModel(interaction, sessionManager);
+      if (sub === 'status') return handleCodeStatus(interaction, sessionManager);
+      if (sub === 'init') return handleCodeInit(interaction, sessionManager);
       if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
       if (sub === 'set-log-channel') return handleSetLogChannel(interaction);
       return;
@@ -211,6 +221,20 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(UNDO_BUTTON_PREFIX)) {
+      return handleUndoButton(interaction, sessionManager);
+    }
+
+    // 'claude-session:revert-confirm:…' doesn't start with 'claude-session:revert:',
+    // so these two prefix checks can't match each other's buttons.
+    if (interaction.isButton() && interaction.customId.startsWith(REVERT_CONFIRM_PREFIX)) {
+      return handleRevertConfirmButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(REVERT_BUTTON_PREFIX)) {
+      return handleRevertButton(interaction, sessionManager);
     }
 
     if (interaction.isButton() && interaction.customId === KEEP_ALIVE_BUTTON_ID) {
