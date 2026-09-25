@@ -19,6 +19,7 @@ import {
   handleKeepAliveButton,
   handleCodeModel,
   handleCodeStatus,
+  handleCoolifyStatus,
   handleCodeInit,
   handleUndoButton,
   handleRevertButton,
@@ -38,6 +39,8 @@ import {
   UNDO_BUTTON_PREFIX,
   REVERT_BUTTON_PREFIX,
   REVERT_CONFIRM_PREFIX,
+  SESSIONS_STATUS_BUTTON_ID,
+  COOLIFY_STATUS_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -224,6 +227,15 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    // Status buttons under the repo picker, and the Refresh button on their replies (same id + ':refresh').
+    if (interaction.isButton() && interaction.customId.startsWith(SESSIONS_STATUS_BUTTON_ID)) {
+      return handleCodeStatus(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(COOLIFY_STATUS_BUTTON_ID)) {
+      return handleCoolifyStatus(interaction);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith(UNDO_BUTTON_PREFIX)) {

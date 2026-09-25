@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { AttachmentBuilder, MessageFlags } from 'discord.js';
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { config } from '../config.js';
 import { buildRepoPickerReply, REPO_SELECT_ID } from './repo-picker.js';
 import { createSessionChannel } from './channel.js';
@@ -32,6 +32,9 @@ import {
   UNDO_BUTTON_PREFIX,
   REVERT_BUTTON_PREFIX,
   REVERT_CONFIRM_PREFIX,
+  SESSIONS_STATUS_BUTTON_ID,
+  COOLIFY_STATUS_BUTTON_ID,
+  STATUS_REFRESH_SUFFIX,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 import { pendingChanges, snapshotWorkingTree, restoreWorkingTree } from '../repo.js';
@@ -487,6 +490,7 @@ const DEPLOY_STATUS_TEXT = {
 
 function formatDuration(ms) {
   const s = Math.round(ms / 1000);
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
 }
 
@@ -642,13 +646,36 @@ export async function handleRevertConfirmButton(interaction, sessionManager) {
   }
 }
 
-/** `/code status` — every open session with its repo, owner, idle time, model and cost so far. */
+function refreshRow(customId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`${customId}${STATUS_REFRESH_SUFFIX}`).setLabel('Refresh').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+  );
+}
+
+/**
+ * Fills in a status reply deferred by deferStatus — a new private reply,
+ * or the same message again when it came from that reply's own Refresh
+ * button. Shared by the sessions and Coolify status views.
+ */
+async function sendStatusReply(interaction, baseCustomId, content) {
+  await interaction.editReply({
+    content: `${content.slice(0, 1900)}\n-# Updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+    components: [refreshRow(baseCustomId)],
+    allowedMentions: { parse: [] },
+  });
+}
+
+/**
+ * `/code status`, or the Open Sessions button under the repo picker — every
+ * open session with its repo, owner, idle time, model and cost so far.
+ */
 export async function handleCodeStatus(interaction, sessionManager) {
   if (!hasAccess(interaction)) return replyNoAccess(interaction);
+  await deferStatus(interaction);
 
   const sessions = sessionManager.listSessions().filter((s) => s.guildId === interaction.guildId);
   if (sessions.length === 0) {
-    await interaction.reply({ content: 'No open sessions right now.', flags: MessageFlags.Ephemeral });
+    await sendStatusReply(interaction, SESSIONS_STATUS_BUTTON_ID, 'No open sessions right now.');
     return;
   }
   const now = Date.now();
@@ -661,11 +688,70 @@ export async function handleCodeStatus(interaction, sessionManager) {
         `${modelLabel(s.model)} · ~$${s.totalCostUsd.toFixed(2)}`,
     );
   const total = sessions.reduce((sum, s) => sum + s.totalCostUsd, 0);
-  await interaction.reply({
-    content: `**${sessions.length} open session${sessions.length === 1 ? '' : 's'}** (total ~$${total.toFixed(2)})\n${lines.join('\n')}`.slice(0, 2000),
-    allowedMentions: { parse: [] },
-    flags: MessageFlags.Ephemeral,
-  });
+  await sendStatusReply(
+    interaction,
+    SESSIONS_STATUS_BUTTON_ID,
+    `**${sessions.length} open session${sessions.length === 1 ? '' : 's'}** (total ~$${total.toFixed(2)})\n${lines.join('\n')}`,
+  );
+}
+
+/** Refresh buttons update their own message; everything else gets a new private reply. */
+async function deferStatus(interaction) {
+  if (interaction.isButton() && interaction.customId.endsWith(STATUS_REFRESH_SUFFIX)) {
+    await interaction.deferUpdate();
+  } else {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+}
+
+// Coolify reports status as 'state:health' (e.g. 'running:healthy', 'exited:unhealthy').
+function coolifyStatusIcon(status) {
+  const [state = '', health = ''] = String(status ?? '').toLowerCase().split(/[:()\s]+/);
+  if (state.startsWith('running')) return health === 'unhealthy' ? '🟡' : '🟢';
+  if (state.startsWith('degraded')) return '🟡';
+  if (state.startsWith('restarting') || state.startsWith('starting')) return '🟠';
+  if (state.startsWith('exited') || state.startsWith('stopped') || state.startsWith('dead')) return '🔴';
+  return '⚪';
+}
+
+/**
+ * Server Status button under the repo picker — everything Coolify runs,
+ * with anything stopped, unhealthy or restarting listed first.
+ */
+export async function handleCoolifyStatus(interaction) {
+  if (!hasAccess(interaction)) return replyNoAccess(interaction);
+  if (!coolify.isConfigured()) {
+    await interaction.reply({ content: 'Coolify isn\'t set up — add COOLIFY_URL and COOLIFY_API_TOKEN to the bot.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await deferStatus(interaction);
+
+  try {
+    const resources = await coolify.listResources();
+    if (resources.length === 0) {
+      await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, "Coolify didn't return anything — check the API token's permissions.");
+      return;
+    }
+    const withIcon = resources.map((r) => ({ ...r, icon: coolifyStatusIcon(r.status) }));
+    const problems = withIcon.filter((r) => r.icon !== '🟢' && r.status);
+    const healthy = withIcon.filter((r) => r.icon === '🟢');
+    const unknown = withIcon.filter((r) => !r.status);
+    const kindLabel = { app: '', database: ' _(database)_', service: ' _(service)_' };
+    const line = (r) => `${r.icon} **${r.name}**${kindLabel[r.kind]}${r.status ? ` — \`${r.status}\`` : ''}`;
+
+    const sections = [];
+    sections.push(
+      problems.length > 0
+        ? `**⚠️ ${problems.length} need${problems.length === 1 ? 's' : ''} attention**\n${problems.map(line).join('\n')}`
+        : '**✅ Everything is running**',
+    );
+    if (healthy.length > 0) sections.push(`**Running (${healthy.length})**\n${healthy.map(line).join('\n')}`);
+    if (unknown.length > 0) sections.push(`**No status reported (${unknown.length})**\n${unknown.map(line).join('\n')}`);
+    await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, sections.join('\n\n'));
+  } catch (err) {
+    console.error('Coolify status failed:', err);
+    await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, `❌ Couldn't reach Coolify: ${err.message}`);
+  }
 }
 
 const INIT_PROMPT = `Create a CLAUDE.md file at the repo root (or improve the existing one) — project notes that future Claude Code sessions will read at the start instead of re-exploring the codebase. Base it on actually reading the code; don't guess or invent commands. Cover, concisely:
@@ -860,4 +946,6 @@ export {
   UNDO_BUTTON_PREFIX,
   REVERT_BUTTON_PREFIX,
   REVERT_CONFIRM_PREFIX,
+  SESSIONS_STATUS_BUTTON_ID,
+  COOLIFY_STATUS_BUTTON_ID,
 };

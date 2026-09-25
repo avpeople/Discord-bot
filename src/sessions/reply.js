@@ -14,6 +14,11 @@ export const KEEP_ALIVE_BUTTON_ID = 'claude-session:keep-alive';
 export const UNDO_BUTTON_PREFIX = 'claude-session:undo:'; // + turn id
 export const REVERT_BUTTON_PREFIX = 'claude-session:revert:'; // + PR number
 export const REVERT_CONFIRM_PREFIX = 'claude-session:revert-confirm:'; // + PR number
+// Under the repo picker. The ":refresh" variants sit on the status reply
+// itself and update it in place instead of sending a new one.
+export const SESSIONS_STATUS_BUTTON_ID = 'claude-session:sessions-status';
+export const COOLIFY_STATUS_BUTTON_ID = 'claude-session:coolify-status';
+export const STATUS_REFRESH_SUFFIX = ':refresh';
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;

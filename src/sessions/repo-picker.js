@@ -1,5 +1,7 @@
-import { ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { listAccessibleRepos } from '../github.js';
+import * as coolify from '../coolify.js';
+import { SESSIONS_STATUS_BUTTON_ID, COOLIFY_STATUS_BUTTON_ID } from './reply.js';
 
 export const REPO_SELECT_ID = 'claude-session:repo-select';
 // Distinct id for the persistent picker channel's select menu (see
@@ -46,6 +48,19 @@ export async function buildRepoPickerReply(selectId = REPO_SELECT_ID) {
 
   return {
     content: `Pick a repo to start a session:${truncatedNote}`,
-    components: [row],
+    components: [row, buildStatusButtonsRow()],
   };
+}
+
+/** Session Status (always) and Server Status (only if Coolify is configured) buttons under the picker. */
+function buildStatusButtonsRow() {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(SESSIONS_STATUS_BUTTON_ID).setLabel('Open Sessions').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+  );
+  if (coolify.isConfigured()) {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(COOLIFY_STATUS_BUTTON_ID).setLabel('Server Status').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
+    );
+  }
+  return row;
 }

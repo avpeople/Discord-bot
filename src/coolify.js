@@ -79,6 +79,24 @@ export async function deploymentLogTail(deploymentUuid, lines = 15) {
   }
 }
 
+const asList = (data) => (Array.isArray(data) ? data : data?.data ?? []);
+
+/**
+ * Everything Coolify runs, with its current status: `[{ kind, name, status }]`
+ * where kind is 'app', 'database' or 'service' and status is Coolify's raw
+ * string (e.g. 'running:healthy', 'exited:unhealthy') or null if the API
+ * didn't include one — documented for applications; databases and
+ * services are best-effort since their list responses aren't documented.
+ * A kind whose endpoint fails is skipped rather than failing the whole list.
+ */
+export async function listResources() {
+  const [apps, databases, services] = await Promise.all(
+    ['/applications', '/databases', '/services'].map((p) => api(p).then(asList).catch(() => [])),
+  );
+  const toResource = (kind) => (r) => ({ kind, name: r.name ?? r.uuid, status: r.status ?? null });
+  return [...apps.map(toResource('app')), ...databases.map(toResource('database')), ...services.map(toResource('service'))];
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
