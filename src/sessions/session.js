@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { config } from '../config.js';
 
 const IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -19,6 +20,18 @@ Use at most 5 options (A-E), keep each option label short (under 60 characters �
 If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
 
 You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).`;
+
+// Tells Claude where and how to pull in other GitHub repos for reference.
+// `gh` authenticates from GITHUB_TOKEN, so this reaches any repo that token
+// can read. Refs live outside the session's working directory (a sibling
+// `<dir>-refs`, like attachments.js's uploads) so Commit never picks them up.
+function referenceReposPrompt(refsDir) {
+  return `If the user asks you to look at another GitHub repo for reference (e.g. "look at how we did it in my-other-repo"):
+- List the account's repos with \`gh repo list <owner> --limit 200\` if you need to find the right one (owner of the current repo: see \`git remote get-url origin\`).
+- For a whole repo, shallow-clone it into the reference folder: \`gh repo clone <owner>/<repo> ${refsDir}/<repo> -- --depth 1\` (skip if it's already there), then read it with your normal tools.
+- For just one or two files, \`gh api repos/<owner>/<repo>/contents/<path> -H "Accept: application/vnd.github.raw"\` is quicker.
+Reference repos are read-only: never edit, commit or push in ${refsDir} — only copy what's useful into the current repo.`;
+}
 
 /**
  * One active Claude Code chat session, scoped to a repo's checked-out
@@ -111,13 +124,17 @@ export class Session {
     };
     if (config.claude.apiKey) env.ANTHROPIC_API_KEY = config.claude.apiKey;
 
+    const refsDir = `${this.dir}-refs`;
+    fs.mkdirSync(refsDir, { recursive: true });
+
     const args = [
       '-p', text,
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
       '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
-      '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
+      '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${referenceReposPrompt(refsDir)}`,
+      '--add-dir', refsDir,
     ];
     // Agent (and its older name, Task) is blocked so each Discord chat stays
     // a single Claude Code conversation — subagents start with a fresh

@@ -289,7 +289,11 @@ section before relying on this in production.
   so Claude can run shell commands inside the session's repo checkout
   and look things up on the web without asking. The
   [Dockerfile](Dockerfile) installs Python, build tools, `gh`, `jq` and
-  `zip`/`unzip` for it to use via Bash. Anyone with
+  `zip`/`unzip` for it to use via Bash. Asked to look at another repo
+  for reference, Claude shallow-clones it with `gh` into a sibling
+  `<session dir>-refs` folder (outside the checkout, so it's never
+  committed; deleted when the session closes) — it can reach any repo
+  `GITHUB_TOKEN` can read. Anyone with
   the Discord role can therefore run arbitrary commands in the bot's
   container — only give that role to people you trust. Subagents
   (`Agent`/`Task`) are blocked via `--disallowedTools` so each Discord

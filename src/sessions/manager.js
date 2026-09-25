@@ -165,6 +165,7 @@ export class SessionManager {
     this._persist();
     await cleanupRepoDir(session.dir);
     await cleanupUploadsDir(session.dir);
+    await fs.promises.rm(`${session.dir}-refs`, { recursive: true, force: true }); // see session.js referenceReposPrompt
 
     const labels = {
       exit: '🔴 Session closed (exit)',
