@@ -116,7 +116,7 @@ export class Session {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
-      '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash',
+      '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
       '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
     ];
     // Agent (and its older name, Task) is blocked so each Discord chat stays

@@ -285,8 +285,11 @@ section before relying on this in production.
 ## Notes / things to tune
 
 - **Tool permissions**: [src/sessions/session.js](src/sessions/session.js)
-  allows `Read,Edit,Write,Glob,Grep,Bash`, so Claude can run shell
-  commands inside the session's repo checkout without asking. Anyone with
+  allows `Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite`,
+  so Claude can run shell commands inside the session's repo checkout
+  and look things up on the web without asking. The
+  [Dockerfile](Dockerfile) installs Python, build tools, `gh`, `jq` and
+  `zip`/`unzip` for it to use via Bash. Anyone with
   the Discord role can therefore run arbitrary commands in the bot's
   container — only give that role to people you trust. Subagents
   (`Agent`/`Task`) are blocked via `--disallowedTools` so each Discord
