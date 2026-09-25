@@ -15,6 +15,7 @@ import {
   buildUndoRow,
   buildRevertRow,
   buildRevertConfirmRow,
+  buildSessionPanelRows,
   chunkMessage,
   parseOptionsBlock,
   describeToolUse,
@@ -35,6 +36,10 @@ import {
   SESSIONS_STATUS_BUTTON_ID,
   COOLIFY_STATUS_BUTTON_ID,
   STATUS_REFRESH_SUFFIX,
+  PANEL_MODEL_SELECT_ID,
+  PANEL_COMMIT_BUTTON_ID,
+  PANEL_CLOSE_BUTTON_ID,
+  PANEL_INIT_BUTTON_ID,
 } from './reply.js';
 import { parseRepoSlug } from '../github.js';
 import { pendingChanges, snapshotWorkingTree, restoreWorkingTree } from '../repo.js';
@@ -110,23 +115,40 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
     base: undefined,
   });
 
-  await channel.send(
-    `👋 Session started for **${fullName}** on branch \`${session.branchName}\`.\n` +
-      `Just chat here — send a message describing what you want changed. ` +
-      `Use the **Commit** button after a reply to commit what's changed so far and merge it straight into ` +
-      `\`${session.defaultBranch}\` (a PR is opened and auto-merged, so it's still reviewable on GitHub afterward). ` +
-      `Run \`/code close\` when you're done — it'll ask whether to commit first or just exit.\n` +
-      `Idle for 4 hours with nothing committed will auto-close and discard pending changes (you'll get a warning 15 minutes before).\n` +
-      `Model: **${modelLabel(session.model)}** — change it with \`/code model\`. You can attach images, text/log/code files and PDFs.` +
-      (fs.existsSync(path.join(session.dir, 'CLAUDE.md'))
-        ? ''
-        : '\n💡 This repo has no `CLAUDE.md` project notes yet — run `/code init` to have Claude write one. ' +
-          'Future sessions read it instead of re-exploring the project, which saves tokens.'),
-  );
+  await channel.send(buildSessionPanel(session));
 
   logEvent(guild.id, `🟢 ${user} opened a session on **${fullName}**: ${channel}`);
 
   return channel;
+}
+
+/** The session's welcome message: a short summary plus the control panel (model dropdown, Commit, Show Changes, Close...). */
+function buildSessionPanel(session) {
+  const hasProjectNotes = fs.existsSync(path.join(session.dir, 'CLAUDE.md'));
+  return {
+    content:
+      `👋 **${session.owner}/${session.repo}** — just type what you want changed.\n` +
+      `-# Commit merges into \`${session.defaultBranch}\` · closes after 4h idle · attach images, logs or PDFs` +
+      (hasProjectNotes ? '' : '\n-# 📝 No project notes yet — Project Notes has Claude write a CLAUDE.md, which saves tokens later'),
+    components: buildSessionPanelRows({ model: session.model, hasProjectNotes }),
+  };
+}
+
+/** Model dropdown on the session panel — switches the model and updates the panel to show it. */
+export async function handlePanelModelSelect(interaction, sessionManager) {
+  if (!hasAccess(interaction)) return replyNoAccess(interaction);
+  const session = sessionManager.getByChannel(interaction.channelId);
+  if (!session) {
+    await interaction.reply({ content: 'This session is closed.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const choice = interaction.values[0];
+  session.setModel(choice === 'default' ? null : choice);
+  await interaction.update(buildSessionPanel(session));
+  await interaction.followUp({
+    content: `🧠 Switched to **${modelLabel(session.model)}** — ${session.turnActive ? 'after the current message' : 'from the next message'}.`,
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 /** Repo picked from the `/code new` select menu — creates the session channel. */
@@ -460,7 +482,12 @@ export async function handleCommitButton(interaction, sessionManager) {
     return;
   }
 
-  await interaction.update({ components: [buildPostReplyRow({ used: 'commit' })] });
+  if (interaction.customId === PANEL_COMMIT_BUTTON_ID) {
+    // From the session panel: leave the panel's buttons alone, just acknowledge.
+    await interaction.reply(`📦 ${interaction.user} is committing...`);
+  } else {
+    await interaction.update({ components: [buildPostReplyRow({ used: 'commit' })] });
+  }
   try {
     const mergeStartedAt = Date.now();
     const outcome = await sessionManager.commitAndMerge(session);
@@ -675,25 +702,45 @@ export async function handleCodeStatus(interaction, sessionManager) {
 
   const sessions = sessionManager.listSessions().filter((s) => s.guildId === interaction.guildId);
   if (sessions.length === 0) {
-    await sendStatusReply(interaction, SESSIONS_STATUS_BUTTON_ID, 'No open sessions right now.');
+    await sendStatusReply(interaction, SESSIONS_STATUS_BUTTON_ID, '### 📋 No open sessions right now');
     return;
   }
   const now = Date.now();
-  const lines = sessions
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-    .map(
-      (s) =>
-        `• <#${s.channelId}> — **${s.owner}/${s.repo}** · <@${s.ownerId}> · ` +
-        `${s.turnActive ? '⚙️ working now' : `idle ${formatDuration(now - s.lastActivityAt)}`} · ` +
-        `${modelLabel(s.model)} · ~$${s.totalCostUsd.toFixed(2)}`,
-    );
+  // Same layout as Server Status: icon + name, then details in small grey subtext, boxed by divider lines.
+  const item = (s) => {
+    const idleMs = now - s.lastActivityAt;
+    let icon = '🟢';
+    let activity = `Last active <t:${Math.floor(s.lastActivityAt / 1000)}:R>`;
+    if (s.turnActive) {
+      icon = '⚙️';
+      activity = 'Working on a message now';
+    } else if (idleMs >= IDLE_WARNING_AT_MS) {
+      icon = '⏰';
+      activity += ' — closes soon if left idle';
+    } else if (idleMs >= 60 * 60 * 1000) {
+      icon = '💤';
+    }
+    return [
+      `${icon} **${s.owner}/${s.repo}**`,
+      `-# <#${s.channelId}> · <@${s.ownerId}>`,
+      `-# ${activity}`,
+      `-# Model: ${modelLabel(s.model)} · Cost so far ~$${s.totalCostUsd.toFixed(2)}`,
+    ].join('\n');
+  };
+  const sorted = sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   const total = sessions.reduce((sum, s) => sum + s.totalCostUsd, 0);
   await sendStatusReply(
     interaction,
     SESSIONS_STATUS_BUTTON_ID,
-    `**${sessions.length} open session${sessions.length === 1 ? '' : 's'}** (total ~$${total.toFixed(2)})\n${lines.join('\n')}`,
+    `### 📋 ${sessions.length} open session${sessions.length === 1 ? '' : 's'} · ~$${total.toFixed(2)} total\n` +
+      `${STATUS_DIVIDER}\n${sorted.map(item).join(`\n${STATUS_DIVIDER}\n`)}\n${STATUS_DIVIDER}`,
   );
 }
+
+// Discord messages don't render Markdown horizontal rules, so a run of box-drawing characters stands in.
+const STATUS_DIVIDER = '─'.repeat(28);
+// Matches the idle warning in session.js (4h auto-close, warned 15 minutes before).
+const IDLE_WARNING_AT_MS = (4 * 60 - 15) * 60 * 1000;
 
 /** Refresh buttons update their own message; everything else gets a new private reply. */
 async function deferStatus(interaction) {
@@ -817,10 +864,8 @@ export async function handleCoolifyStatus(interaction) {
       const deploy = describeLastDeploy(r.lastDeploy);
       return [`${r.icon} ${r.label}`, `-# Status: ${friendlyCoolifyStatus(r.status)}`, ...(deploy ? [`-# ${deploy}`] : [])].join('\n');
     };
-    // Discord messages don't render Markdown horizontal rules, so a run of box-drawing characters stands in.
-    const divider = '─'.repeat(28);
     // Lines above, between and below the items, so each one sits in its own box.
-    const list = (group) => `${divider}\n${group.map(line).join(`\n${divider}\n`)}\n${divider}`;
+    const list = (group) => `${STATUS_DIVIDER}\n${group.map(line).join(`\n${STATUS_DIVIDER}\n`)}\n${STATUS_DIVIDER}`;
 
     const sections = [
       problems.length > 0
@@ -1032,4 +1077,8 @@ export {
   REVERT_CONFIRM_PREFIX,
   SESSIONS_STATUS_BUTTON_ID,
   COOLIFY_STATUS_BUTTON_ID,
+  PANEL_MODEL_SELECT_ID,
+  PANEL_COMMIT_BUTTON_ID,
+  PANEL_CLOSE_BUTTON_ID,
+  PANEL_INIT_BUTTON_ID,
 };

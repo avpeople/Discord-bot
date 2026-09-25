@@ -20,6 +20,7 @@ import {
   handleCodeModel,
   handleCodeStatus,
   handleCoolifyStatus,
+  handlePanelModelSelect,
   handleCodeInit,
   handleUndoButton,
   handleRevertButton,
@@ -41,6 +42,10 @@ import {
   REVERT_CONFIRM_PREFIX,
   SESSIONS_STATUS_BUTTON_ID,
   COOLIFY_STATUS_BUTTON_ID,
+  PANEL_MODEL_SELECT_ID,
+  PANEL_COMMIT_BUTTON_ID,
+  PANEL_CLOSE_BUTTON_ID,
+  PANEL_INIT_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -227,6 +232,23 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    // Session panel under the welcome message. Show Changes reuses SHOW_CHANGES_BUTTON_ID (routed above).
+    if (interaction.isStringSelectMenu() && interaction.customId === PANEL_MODEL_SELECT_ID) {
+      return handlePanelModelSelect(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === PANEL_COMMIT_BUTTON_ID) {
+      return handleCommitButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === PANEL_CLOSE_BUTTON_ID) {
+      return handleCodeClose(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === PANEL_INIT_BUTTON_ID) {
+      return handleCodeInit(interaction, sessionManager);
     }
 
     // Status buttons under the repo picker, and the Refresh button on their replies (same id + ':refresh').

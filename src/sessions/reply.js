@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 
 export const COMMIT_BUTTON_ID = 'claude-session:commit';
 export const KEEP_GOING_BUTTON_ID = 'claude-session:keep-going';
@@ -19,6 +19,53 @@ export const REVERT_CONFIRM_PREFIX = 'claude-session:revert-confirm:'; // + PR n
 export const SESSIONS_STATUS_BUTTON_ID = 'claude-session:sessions-status';
 export const COOLIFY_STATUS_BUTTON_ID = 'claude-session:coolify-status';
 export const STATUS_REFRESH_SUFFIX = ':refresh';
+// Controls under the session's welcome message.
+export const PANEL_MODEL_SELECT_ID = 'claude-session:panel-model';
+export const PANEL_COMMIT_BUTTON_ID = 'claude-session:panel-commit';
+export const PANEL_CLOSE_BUTTON_ID = 'claude-session:panel-close';
+export const PANEL_INIT_BUTTON_ID = 'claude-session:panel-init';
+
+const MODEL_CHOICES = [
+  { value: 'sonnet', label: 'Sonnet', description: 'Fast and cheaper — good for most tasks' },
+  { value: 'opus', label: 'Opus', description: 'Most capable, most expensive' },
+  { value: 'haiku', label: 'Haiku', description: 'Fastest and cheapest — simple tasks' },
+  { value: 'default', label: 'Default', description: "The bot's default model" },
+];
+
+/**
+ * The control panel under a session's welcome message: a model dropdown
+ * (showing the current one), then Commit / Show Changes / Close, plus
+ * Project Notes when the repo has no CLAUDE.md yet. `model` is the
+ * session's model (null = default).
+ */
+export function buildSessionPanelRows({ model, hasProjectNotes }) {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(PANEL_MODEL_SELECT_ID)
+    .setPlaceholder('Model')
+    .addOptions(
+      MODEL_CHOICES.map((c) => ({
+        label: `Model: ${c.label}`,
+        description: c.description,
+        value: c.value,
+        default: c.value === (model ?? 'default'),
+      })),
+    );
+
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Commit').setEmoji('📦').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+  );
+  if (!hasProjectNotes) {
+    buttons.addComponents(
+      new ButtonBuilder().setCustomId(PANEL_INIT_BUTTON_ID).setLabel('Project Notes').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    );
+  }
+  buttons.addComponents(
+    new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
+  );
+
+  return [new ActionRowBuilder().addComponents(select), buttons];
+}
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
