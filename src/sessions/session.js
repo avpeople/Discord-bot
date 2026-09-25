@@ -20,7 +20,9 @@ Use at most 5 options (A-E), keep each option label short (under 60 characters �
 
 If you have more than one distinct question or decision to put to the user, ask only ONE per reply and stop there — do not list several questions in the same message. Ask the single most important/blocking one first (using an options block if it's a real multiple-choice decision, or plain text if it's open-ended), end your turn, and wait for their answer before asking the next one. The user's Discord client shows one question at a time; asking several at once means only the first gets a clear answer.
 
-You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).`;
+You have the Bash tool available and enabled — use it freely for shell commands (npm/build tools, running tests, git, checking a command's output, etc.).
+
+This is a fresh clone of the repo, so dependencies are NOT installed yet. Whenever you need to build, type-check, lint or test, install them first — don't skip verification because of it, and don't tell the user you couldn't check because deps are missing. Use the repo's own package manager, matching its lockfile: package-lock.json → \`npm ci\`, pnpm-lock.yaml → \`pnpm install --frozen-lockfile\`, yarn.lock → \`yarn install --frozen-lockfile\`, otherwise \`npm install\`; for Python use a venv (\`python -m venv .venv && .venv/bin/pip install -r requirements.txt\`). Installing takes a while, so give those commands a long timeout (e.g. 600000 ms). Dependency folders (node_modules, .venv) are normally gitignored, so they won't be committed — but if the repo's .gitignore doesn't cover them, add them to it rather than committing them. Only report that you couldn't verify something if installing or running it actually failed, and say what the error was.`;
 
 // Tells Claude where and how to pull in other GitHub repos for reference.
 // `gh` authenticates from GITHUB_TOKEN, so this reaches any repo that token
@@ -181,6 +183,10 @@ export class Session {
     const env = {
       ...process.env,
       CLAUDE_CONFIG_DIR: config.claude.configDir,
+      // Claude Code's Bash tool defaults to a 2-minute limit per command, too
+      // short for installing dependencies or building in a fresh clone.
+      BASH_DEFAULT_TIMEOUT_MS: process.env.BASH_DEFAULT_TIMEOUT_MS || String(5 * 60 * 1000),
+      BASH_MAX_TIMEOUT_MS: process.env.BASH_MAX_TIMEOUT_MS || String(15 * 60 * 1000),
     };
     if (config.claude.apiKey) env.ANTHROPIC_API_KEY = config.claude.apiKey;
 

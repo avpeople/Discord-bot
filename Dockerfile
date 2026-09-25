@@ -22,6 +22,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# pnpm and yarn, for repos that use them instead of npm (bundled with Node, just switched off by default)
+RUN corepack enable
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
