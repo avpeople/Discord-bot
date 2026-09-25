@@ -18,6 +18,33 @@ function canManage(member) {
   return member?.permissions?.has(PermissionsBitField.Flags.ManageRoles) ?? false;
 }
 
+/**
+ * Discord rejects role grants with a generic "Missing Access"/"Missing
+ * Permissions" error in two situations that look identical from the error
+ * message alone, so we check both directly and say which one it is:
+ *   1. The bot's own highest role isn't positioned ABOVE the role being
+ *      granted (Discord's role hierarchy rule — Manage Roles isn't enough).
+ *   2. The bot itself lacks the Manage Roles permission in the guild.
+ * Returns a human-readable reason string, or null if everything looks fine.
+ */
+function diagnoseRoleGrantProblem(guild, role) {
+  const botMember = guild.members.me;
+  if (!botMember) return "the bot's own member record couldn't be loaded.";
+  if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+    return "the bot doesn't have the **Manage Roles** permission in this server.";
+  }
+  if (role.position >= botMember.roles.highest.position) {
+    return (
+      `the bot's highest role (**${botMember.roles.highest.name}**) is at or below **${role.name}** ` +
+      `in Server Settings → Roles. Drag the bot's role above **${role.name}** and try again.`
+    );
+  }
+  if (role.managed) {
+    return `**${role.name}** is managed by an integration/bot and can't be assigned manually.`;
+  }
+  return null;
+}
+
 function replyNoPermission(interaction) {
   return interaction.reply({
     content: "You need the **Manage Roles** permission to do that.",
@@ -33,8 +60,11 @@ export async function handleWelcomeAddRole(interaction) {
   const label = interaction.options.getString('label') || role.name;
   addRole(interaction.guildId, role.id, label);
 
+  const problem = diagnoseRoleGrantProblem(interaction.guild, role);
+  const warning = problem ? `\n\n⚠️ The bot can't actually grant this role yet: ${problem}` : '';
+
   await interaction.reply({
-    content: `✅ Added **${label}** (${role}) to the welcome panel's requestable roles. Re-run \`/welcome post\` in a channel to update the panel there.`,
+    content: `✅ Added **${label}** (${role}) to the welcome panel's requestable roles. Re-run \`/welcome post\` in a channel to update the panel there.${warning}`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -165,8 +195,12 @@ async function handleDecision({ interaction, approve }) {
     try {
       await member.roles.add(role);
     } catch (err) {
+      const problem = diagnoseRoleGrantProblem(interaction.guild, role);
+      const detail = problem
+        ? problem
+        : `${err.message} (unclear cause — check the bot's permissions and role position in Server Settings → Roles)`;
       await interaction.update({
-        content: `${interaction.message.content}\n\n❌ Failed to add the role: ${err.message}`,
+        content: `${interaction.message.content}\n\n❌ Failed to add the role: ${detail}`,
         components: [],
       });
       return;
