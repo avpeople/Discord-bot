@@ -36,15 +36,20 @@ const MODEL_CHOICES = [
  * The control panel under a session's welcome message: a model dropdown
  * (showing the current one), then Commit / Show Changes / Close, plus
  * Project Notes when the repo has no CLAUDE.md yet. `model` is the
- * session's model (null = default).
+ * session's model (null = default); `defaultModel` is what "Default"
+ * resolves to (CLAUDE_MODEL, e.g. 'sonnet'), shown in its label — null if
+ * unset, meaning Claude Code's own account default.
  */
-export function buildSessionPanelRows({ model, hasProjectNotes }) {
+export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) {
+  const defaultName = defaultModel
+    ? MODEL_CHOICES.find((c) => c.value === defaultModel)?.label ?? defaultModel
+    : 'account setting';
   const select = new StringSelectMenuBuilder()
     .setCustomId(PANEL_MODEL_SELECT_ID)
     .setPlaceholder('Model')
     .addOptions(
       MODEL_CHOICES.map((c) => ({
-        label: `Model: ${c.label}`,
+        label: c.value === 'default' ? `Model: Default (${defaultName})` : `Model: ${c.label}`,
         description: c.description,
         value: c.value,
         default: c.value === (model ?? 'default'),

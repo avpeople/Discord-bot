@@ -130,7 +130,7 @@ function buildSessionPanel(session) {
       `👋 **${session.owner}/${session.repo}** — just type what you want changed.\n` +
       `-# Commit merges into \`${session.defaultBranch}\` · closes after 4h idle · attach images, logs or PDFs` +
       (hasProjectNotes ? '' : '\n-# 📝 No project notes yet — Project Notes has Claude write a CLAUDE.md, which saves tokens later'),
-    components: buildSessionPanelRows({ model: session.model, hasProjectNotes }),
+    components: buildSessionPanelRows({ model: session.model, hasProjectNotes, defaultModel: config.claude.defaultModel }),
   };
 }
 
