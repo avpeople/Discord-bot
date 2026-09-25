@@ -17,6 +17,23 @@ const commands = [
     )
     .addSubcommand((sub) =>
       sub
+        .setName('model')
+        .setDescription("Switch this session's Claude model (Sonnet is much cheaper than Opus)")
+        .addStringOption((opt) =>
+          opt
+            .setName('model')
+            .setDescription('Which model to use from the next message on')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Sonnet — fast and cheaper, good for most tasks', value: 'sonnet' },
+              { name: 'Opus — most capable, most expensive', value: 'opus' },
+              { name: 'Haiku — fastest and cheapest, simple tasks', value: 'haiku' },
+              { name: 'Default — the bot/account default', value: 'default' },
+            ),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('set-picker-channel')
         .setDescription('Make a channel always show the repo picker (posts it there now)')
         .addChannelOption((opt) =>

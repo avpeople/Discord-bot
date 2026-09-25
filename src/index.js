@@ -13,6 +13,12 @@ import {
   handleOptionButton,
   handleClosePushButton,
   handleCloseExitButton,
+  handleStopButton,
+  handleShowChangesButton,
+  handleFreshStartButton,
+  handleKeepAliveButton,
+  handleCodeModel,
+  sendIdleWarning,
   REPO_SELECT_ID,
   COMMIT_BUTTON_ID,
   KEEP_GOING_BUTTON_ID,
@@ -20,6 +26,10 @@ import {
   OPTION_BUTTON_PREFIX,
   CLOSE_PUSH_BUTTON_ID,
   CLOSE_EXIT_BUTTON_ID,
+  STOP_BUTTON_ID,
+  SHOW_CHANGES_BUTTON_ID,
+  FRESH_START_BUTTON_ID,
+  KEEP_ALIVE_BUTTON_ID,
 } from './sessions/handlers.js';
 import {
   handleWelcomeAddRole,
@@ -50,6 +60,20 @@ const client = new Client({
 });
 
 const sessionManager = new SessionManager();
+
+sessionManager.onIdleWarning = async (session) => {
+  const channel = await client.channels.fetch(session.channelId).catch(() => null);
+  if (!channel) return;
+  await sendIdleWarning(channel, session).catch((err) => console.error('Failed to post idle warning:', err));
+};
+
+sessionManager.onIdleExpire = async (session) => {
+  const channel = await client.channels.fetch(session.channelId).catch(() => null);
+  if (!channel) return;
+  await channel
+    .send('⏱️ This session was closed after 4 hours idle. Start a new one with `/code new`.')
+    .catch((err) => console.error('Failed to post idle-close notice:', err));
+};
 
 // Button IDs from the old Bash Approve/Deny prompt, which no longer exists
 // (Bash is always allowed now). Used to strip leftover buttons from
@@ -104,6 +128,7 @@ client.on('interactionCreate', async (interaction) => {
       const sub = interaction.options.getSubcommand();
       if (sub === 'new') return handleCodeNew(interaction);
       if (sub === 'close') return handleCodeClose(interaction, sessionManager);
+      if (sub === 'model') return handleCodeModel(interaction, sessionManager);
       if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
       if (sub === 'set-log-channel') return handleSetLogChannel(interaction);
       return;
@@ -174,6 +199,22 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === CLOSE_EXIT_BUTTON_ID) {
       return handleCloseExitButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === STOP_BUTTON_ID) {
+      return handleStopButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === SHOW_CHANGES_BUTTON_ID) {
+      return handleShowChangesButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
+      return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    if (interaction.isButton() && interaction.customId === KEEP_ALIVE_BUTTON_ID) {
+      return handleKeepAliveButton(interaction, sessionManager);
     }
 
     // Any old Approve/Deny button the startup sweep missed just removes itself when clicked.

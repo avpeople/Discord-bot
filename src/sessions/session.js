@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { config } from '../config.js';
 
 const IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+const IDLE_WARNING_BEFORE_MS = 15 * 60 * 1000; // warn 15 minutes before the idle auto-close
 
 // Instructs Claude to offer clickable Discord buttons for genuine
 // multiple-choice decisions, instead of just asking in prose. The bot
@@ -59,6 +60,8 @@ export class Session {
     claudeSessionId = null,
     hasPushedAnything = false,
     commitCount = 0,
+    model = null,
+    totalCostUsd = 0,
   }) {
     this.id = id;
     this.channelId = channelId;
@@ -77,12 +80,26 @@ export class Session {
     // Incremented each time a Commit merges and the session re-branches off
     // the default branch, so each new branch/PR gets a unique name.
     this.commitCount = commitCount;
-    this.busy = false; // true while a turn is in flight
+    // Model alias passed to --model (e.g. 'sonnet', 'opus'); null uses
+    // config.claude.defaultModel, or the account default if that's unset too.
+    this.model = model;
+    // Running total of the cost Claude Code reports per turn (total_cost_usd
+    // on the result event) — an estimate on subscription logins.
+    this.totalCostUsd = totalCostUsd;
+    this.busy = false; // true while the `claude` process is running
+    // true for the whole of handlers.js runTurn — wider than `busy`: also
+    // covers posting the reply and running queued messages afterwards.
+    this.turnActive = false;
     this.closed = false;
     this.pendingOptions = null; // option labels from the most recent ```options block, for button clicks
+    this.queuedMessages = []; // user messages sent while busy, run together as the next turn
 
+    this._child = null; // the in-flight `claude` process, if any (for stop())
+    this._stopRequested = false;
     this._idleTimer = null;
+    this._idleWarningTimer = null;
     this._onIdleExpire = null; // set by SessionManager
+    this._onIdleWarning = null; // set by SessionManager
     this._onChange = null; // set by SessionManager; called whenever persisted fields change
 
     this._touchIdleTimer();
@@ -103,13 +120,45 @@ export class Session {
       claudeSessionId: this.claudeSessionId,
       hasPushedAnything: this.hasPushedAnything,
       commitCount: this.commitCount,
+      model: this.model,
+      totalCostUsd: this.totalCostUsd,
     };
   }
 
   /**
-   * Sends one user turn to Claude Code and resolves with `{ result }` —
-   * the final `result` event. `onEvent` is called for every streamed
-   * event (assistant tool-use, etc.) so the caller can show progress.
+   * Forgets Claude's conversation history so the next message starts a new
+   * Claude conversation on the same repo/branch. Files on disk are
+   * untouched. Long conversations get more expensive per message (the whole
+   * history is resent each turn), so this is the cheap way to reset.
+   */
+  resetConversation() {
+    this.claudeSessionId = null;
+    this._onChange?.(this);
+  }
+
+  setModel(model) {
+    this.model = model;
+    this._onChange?.(this);
+  }
+
+  /** Kills the in-flight turn, if any. The pending sendMessage resolves with `{ result: null, stopped: true }`. */
+  stop() {
+    if (!this._child) return false;
+    this._stopRequested = true;
+    this._child.kill('SIGTERM');
+    return true;
+  }
+
+  /** Resets the idle auto-close countdown (used by the idle warning's Keep alive button). */
+  keepAlive() {
+    this._touchIdleTimer();
+  }
+
+  /**
+   * Sends one user turn to Claude Code and resolves with `{ result, stopped }`
+   * — `result` is the final `result` event (null if the turn was stopped via
+   * stop()). `onEvent` is called for every streamed event (assistant
+   * tool-use, etc.) so the caller can show progress.
    */
   sendMessage(text, { onEvent } = {}) {
     if (this.closed) return Promise.reject(new Error('Session is closed'));
@@ -142,12 +191,18 @@ export class Session {
     // --disallowedTools is the actual enforcement mechanism; --allowedTools
     // alone does NOT reliably block a tool it omits (verified against the CLI).
     args.push('--disallowedTools', 'Agent,Task');
+    const model = this.model || config.claude.defaultModel;
+    if (model) {
+      args.push('--model', model);
+    }
     if (this.claudeSessionId) {
       args.push('--resume', this.claudeSessionId);
     }
 
+    this._stopRequested = false;
     return new Promise((resolve, reject) => {
       const child = spawn('claude', args, { cwd: this.dir, env });
+      this._child = child;
       // No stdin is piped in -p mode with a text prompt arg — close it
       // immediately so Claude doesn't spend ~3s waiting to see if stdin
       // data is coming (verified against the CLI: it warns and stalls
@@ -174,7 +229,13 @@ export class Session {
             this.claudeSessionId = event.session_id;
             this._onChange?.(this);
           }
-          if (event.type === 'result') lastResult = event;
+          if (event.type === 'result') {
+            lastResult = event;
+            if (typeof event.total_cost_usd === 'number') {
+              this.totalCostUsd += event.total_cost_usd;
+              this._onChange?.(this);
+            }
+          }
           onEvent?.(event);
         }
       });
@@ -185,30 +246,42 @@ export class Session {
 
       child.on('error', (err) => {
         this.busy = false;
+        this._child = null;
         reject(err);
       });
 
       child.on('close', (code) => {
         this.busy = false;
+        this._child = null;
+        if (this._stopRequested) {
+          resolve({ result: null, stopped: true });
+          return;
+        }
         if (code !== 0 && !lastResult) {
           reject(new Error(`claude exited with code ${code}: ${stderr.slice(-2000)}`));
           return;
         }
-        resolve({ result: lastResult });
+        resolve({ result: lastResult, stopped: false });
       });
     });
   }
 
   _touchIdleTimer() {
     if (this._idleTimer) clearTimeout(this._idleTimer);
+    if (this._idleWarningTimer) clearTimeout(this._idleWarningTimer);
+    this._idleWarningTimer = setTimeout(() => {
+      this._onIdleWarning?.(this);
+    }, IDLE_TIMEOUT_MS - IDLE_WARNING_BEFORE_MS);
     this._idleTimer = setTimeout(() => {
       this._onIdleExpire?.(this);
     }, IDLE_TIMEOUT_MS);
   }
 
-  /** Clears timers. No child process to kill between messages by design. */
+  /** Clears timers and kills any in-flight turn. */
   teardown() {
     if (this._idleTimer) clearTimeout(this._idleTimer);
+    if (this._idleWarningTimer) clearTimeout(this._idleWarningTimer);
+    this._child?.kill('SIGTERM');
     this.closed = true;
   }
 }

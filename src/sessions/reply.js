@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 
 export const COMMIT_BUTTON_ID = 'claude-session:commit';
@@ -6,9 +7,74 @@ export const EXIT_BUTTON_ID = 'claude-session:exit';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
 export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
 export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
+export const STOP_BUTTON_ID = 'claude-session:stop';
+export const SHOW_CHANGES_BUTTON_ID = 'claude-session:show-changes';
+export const FRESH_START_BUTTON_ID = 'claude-session:fresh-start';
+export const KEEP_ALIVE_BUTTON_ID = 'claude-session:keep-alive';
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
+
+function truncate(text, max) {
+  const oneLine = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+/**
+ * One short progress line for a tool_use block, shown live in the
+ * "Thinking..." message while a turn runs. `dir` is the session's working
+ * directory, used to shorten absolute file paths.
+ */
+export function describeToolUse(block, dir) {
+  const input = block.input ?? {};
+  const file = (p) => `\`${truncate(p && path.isAbsolute(p) ? path.relative(dir, p) || p : p, 60)}\``;
+  switch (block.name) {
+    case 'Read':
+      return `📖 Reading ${file(input.file_path)}`;
+    case 'Edit':
+    case 'MultiEdit':
+      return `✏️ Editing ${file(input.file_path)}`;
+    case 'Write':
+      return `📝 Writing ${file(input.file_path)}`;
+    case 'Bash':
+      return `⚙️ Running \`${truncate(input.command, 70)}\``;
+    case 'Grep':
+      return `🔎 Searching for \`${truncate(input.pattern, 50)}\``;
+    case 'Glob':
+      return `🔎 Finding files \`${truncate(input.pattern, 50)}\``;
+    case 'WebSearch':
+      return `🌐 Searching the web for "${truncate(input.query, 60)}"`;
+    case 'WebFetch':
+      return `🌐 Reading ${truncate(input.url, 70)}`;
+    case 'TodoWrite':
+      return '📋 Updating its task list';
+    default:
+      return `🔧 ${block.name}`;
+  }
+}
+
+/**
+ * "3 tool calls · 45.2k tokens · ~$0.12" from a turn's `result` event
+ * (`usage` + `total_cost_usd`, reported by Claude Code at the end of each
+ * turn). Token count includes cached context re-read from earlier in the
+ * conversation, which is why long chats climb. Cost is an estimate on
+ * subscription logins. Pieces the event doesn't carry are left out.
+ */
+export function formatTurnStats(result, toolCallCount) {
+  const parts = [];
+  if (toolCallCount > 0) parts.push(`${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}`);
+  const u = result?.usage;
+  if (u) {
+    const tokens =
+      (u.input_tokens ?? 0) +
+      (u.output_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0);
+    parts.push(tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k tokens` : `${tokens} tokens`);
+  }
+  if (typeof result?.total_cost_usd === 'number') parts.push(`~$${result.total_cost_usd.toFixed(2)}`);
+  return parts.join(' · ');
+}
 
 /** Splits long text into Discord-message-sized chunks, breaking on newlines where possible. */
 export function chunkMessage(text, maxLen = DISCORD_MAX_LEN) {
@@ -71,10 +137,13 @@ export function buildOpenSessionRow(guildId, channelId) {
 }
 
 /**
- * The Commit / Keep Going / Exit action row shown after each Claude reply.
- * Commit commits everything changed so far, opens a PR, and immediately
- * merges it into the default branch (see manager.js commitAndMerge).
- * Exit closes the session (discarding anything uncommitted).
+ * The Commit / Keep Going / Show Changes / Fresh Start / Exit action row
+ * shown after each Claude reply. Commit commits everything changed so far,
+ * opens a PR, and immediately merges it into the default branch (see
+ * manager.js commitAndMerge). Show Changes lists what Commit would include.
+ * Fresh Start clears Claude's conversation history (not the files) to cut
+ * per-message cost. Exit closes the session (discarding anything
+ * uncommitted).
  *
  * Once Commit or Keep Going is clicked on a given message, that message's
  * row collapses to just a disabled "used" version of whichever was
@@ -96,11 +165,27 @@ export function buildPostReplyRow({ used } = {}) {
     row.addComponents(
       new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(KEEP_GOING_BUTTON_ID).setLabel('Keep Going').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('Fresh Start').setStyle(ButtonStyle.Secondary),
     );
   }
 
   row.addComponents(new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger));
   return row;
+}
+
+/** The Stop button on the live "Thinking..." message while a turn runs. */
+export function buildStopRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(STOP_BUTTON_ID).setLabel('Stop').setStyle(ButtonStyle.Danger),
+  );
+}
+
+/** The Keep Alive button on the warning posted shortly before the idle auto-close. */
+export function buildIdleWarningRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(KEEP_ALIVE_BUTTON_ID).setLabel('Keep Alive').setStyle(ButtonStyle.Success),
+  );
 }
 
 /** The Push / Exit choice shown by `/code close`. */

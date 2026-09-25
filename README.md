@@ -28,11 +28,20 @@ trust to make that call.
    conversation, so it feels continuous. (A single long-running `claude`
    process fed over stdin does **not** behave like a chat REPL — verified
    directly against the CLI — so this per-message-resume approach is what
-   actually works.) Attach an image (e.g. a screenshot of a bug) and it's
-   downloaded to a folder *outside* the repo checkout — never committed —
+   actually works.) Attach an image (e.g. a screenshot of a bug), a
+   text/log/code file or a PDF and it's downloaded to a folder *outside* the repo checkout — never committed —
    and referenced by path in the prompt so Claude can read it
    ([src/sessions/attachments.js](src/sessions/attachments.js)).
-4. After each reply, **Commit** / **Keep Going** / **Exit** buttons appear:
+   While Claude works, the "Thinking..." message updates live with what
+   it's doing (reading a file, running a command, ...) and has a **Stop**
+   button that kills the turn (file changes so far are kept). Messages
+   sent while it's busy are queued and sent together as one follow-up
+   turn. Each reply ends with a stats line — tool calls, tokens, and
+   Claude Code's reported cost for that turn plus the session total (an
+   estimate on subscription logins); the log channel gets the session
+   total on close.
+4. After each reply, **Commit** / **Keep Going** / **Show Changes** /
+   **Fresh Start** / **Exit** buttons appear:
    - **Commit** commits everything changed since the last commit, opens a
      PR, and immediately merges it (squash) into the repo's default
      branch. The session then re-branches off the freshly-updated default
@@ -41,6 +50,11 @@ trust to make that call.
      Clicking it collapses that message's row to a disabled "Committed ✓".
    - **Keep Going** just collapses that message's row to "Kept Going ✓";
      changes stay uncommitted.
+   - **Show Changes** privately lists the files Commit would include,
+     with the full diff attached as `changes.diff`.
+   - **Fresh Start** clears Claude's conversation history (files are
+     kept). Every message resends the whole conversation, so long chats
+     get steadily more expensive — this resets that.
    - **Exit** closes the session (discarding anything not already
      committed) and removes the channel. Unlike Commit/Keep Going, Exit
      stays live on every past reply — not just the newest — so you can
@@ -60,7 +74,11 @@ trust to make that call.
    anything pending the same way Commit does, then close) or **Exit**
    (close without committing — pending changes are discarded).
 8. Idle 4 hours with no messages → pending changes are discarded and the
-   session auto-closes, same as Exit.
+   session auto-closes, same as Exit. A warning with a **Keep Alive**
+   button is posted 15 minutes before.
+9. `/code model` switches the session between Sonnet, Opus and Haiku
+   (Sonnet is much cheaper than Opus). `CLAUDE_MODEL` in `.env` sets the
+   default for new sessions.
 
 Session state (channel ↔ repo ↔ branch ↔ Claude conversation id) is
 persisted to disk on the `claude-config` volume, so sessions survive a

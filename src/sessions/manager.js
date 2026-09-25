@@ -57,6 +57,7 @@ export class SessionManager {
 
   _wire(session) {
     session._onIdleExpire = (s) => this._handleIdleExpire(s);
+    session._onIdleWarning = (s) => this.onIdleWarning?.(s);
     session._onChange = () => this._persist();
   }
 
@@ -172,7 +173,10 @@ export class SessionManager {
       push: '🔴 Session closed (pushed first)',
       idle: '⏱️ Session auto-closed (4h idle timeout)',
     };
-    logEvent(session.guildId, `${labels[reason] ?? labels.exit} on **${session.owner}/${session.repo}**`);
+    logEvent(
+      session.guildId,
+      `${labels[reason] ?? labels.exit} on **${session.owner}/${session.repo}** — total cost ~$${session.totalCostUsd.toFixed(2)}`,
+    );
   }
 
   async _handleIdleExpire(session) {

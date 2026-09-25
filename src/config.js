@@ -23,6 +23,9 @@ export const config = {
   claude: {
     configDir: process.env.CLAUDE_CONFIG_DIR || '/data/claude-config',
     apiKey: process.env.ANTHROPIC_API_KEY || null,
+    // Model alias for sessions that haven't picked one with /code model
+    // (e.g. 'sonnet'). Unset = Claude Code's own account default.
+    defaultModel: process.env.CLAUDE_MODEL || null,
   },
   workspaceDir: process.env.WORKSPACE_DIR || '/data/workspaces',
   sessionsStatePath: process.env.SESSIONS_STATE_PATH || '/data/claude-config/discord-sessions.json',

@@ -63,6 +63,23 @@ export async function diffSummary(git, base, branchName) {
   return git.diff([`${base}...${branchName}`, '--stat']);
 }
 
+/**
+ * Everything changed in the working directory since the last commit,
+ * including new untracked files: `{ files, stat, patch }` where `files` is
+ * `git status --short` output and `patch` the full diff. Untracked files
+ * are marked intent-to-add first so they show up in the diff — harmless,
+ * since Commit stages everything with `add .` anyway.
+ */
+export async function pendingChanges(git) {
+  await git.raw(['add', '--intent-to-add', '--all']);
+  const [files, stat, patch] = await Promise.all([
+    git.raw(['status', '--short']),
+    git.raw(['diff', 'HEAD', '--shortstat']),
+    git.raw(['diff', 'HEAD']),
+  ]);
+  return { files: files.trim(), stat: stat.trim(), patch };
+}
+
 /** Discards all uncommitted working-directory changes (used on idle timeout). */
 export async function discardPendingChanges(git) {
   await git.reset(['--hard']);
