@@ -11,6 +11,7 @@ import {
 } from '../repo.js';
 import { openPullRequest, mergePullRequest, deleteBranch, openRevertPullRequest } from '../github.js';
 import { Session } from './session.js';
+import { writePullRequestSummary } from './pr-writer.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
 import { cleanupUploadsDir } from './attachments.js';
 import { logEvent } from '../log-channel.js';
@@ -127,19 +128,26 @@ export class SessionManager {
    * merged.
    */
   async commitAndMerge(session, message) {
-    const commitMessage = message || `Claude Code session ${session.id}`;
+    // A descriptive title/summary written by Claude from the diff (see
+    // pr-writer.js); falls back to the generic title if that fails.
+    const summary = message ? null : await writePullRequestSummary(session).catch(() => null);
+    if (summary?.costUsd) {
+      session.totalCostUsd += summary.costUsd;
+    }
+    const commitMessage = message || summary?.title || `Claude Code session ${session.id}`;
     const { pushed } = await commitAndPush(session.git, session.branchName, commitMessage);
     if (!pushed) return null;
 
     session.hasPushedAnything = true;
 
+    const footer = `Pushed live from an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``;
     const pr = await openPullRequest({
       owner: session.owner,
       repo: session.repo,
       base: session.defaultBranch,
       head: session.branchName,
       title: commitMessage,
-      body: `Committed via an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``,
+      body: summary?.body ? `${summary.body}\n\n---\n${footer}` : footer,
     });
 
     const merged = await mergePullRequest({

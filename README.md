@@ -136,6 +136,19 @@ or it runs past 30. From inside a Coolify-deployed container
 `http://coolify:8080` usually reaches Coolify; otherwise use the
 dashboard's URL. See [src/coolify.js](src/coolify.js).
 
+**Server Status controls.** Under Server Status, the *Manage an app*
+dropdown opens that app privately with **📜 Logs** (last 30 lines),
+**🔄 Restart**, **🚀 Redeploy** and **⏹️ Stop** / **▶️ Start**, each behind
+a confirm step; the bot then follows the resulting Coolify deployment in
+the same message ([src/coolify-controls.js](src/coolify-controls.js)).
+These need the Coolify API token to have **write** and **deploy**
+permissions (read is enough for status and logs).
+
+**PR titles.** Push Live's PR title and description are written by
+Claude (Haiku) from the diff
+([src/sessions/pr-writer.js](src/sessions/pr-writer.js)), falling back to
+a generic title if that fails.
+
 ## Activity log (optional)
 
 `/code set-log-channel channel:#audit-log` (requires **Manage Channels**)

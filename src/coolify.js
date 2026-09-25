@@ -24,19 +24,78 @@ export function isConfigured() {
   return Boolean(config.coolify.url && config.coolify.apiToken);
 }
 
-async function api(path) {
+async function api(path, method = 'GET') {
   const url = `${config.coolify.url.replace(/\/+$/, '')}/api/v1${path}`;
   const res = await fetch(url, {
+    method,
     headers: { Authorization: `Bearer ${config.coolify.apiToken}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    const err = new Error(`Coolify API ${res.status} ${res.statusText} for ${path}`);
+    let detail = '';
+    try {
+      detail = (await res.json())?.message ?? '';
+    } catch {
+      // no JSON body
+    }
+    const err = new Error(
+      res.status === 401 || res.status === 403
+        ? "Coolify refused — the API token is wrong or doesn't have permission for this (Restart/Stop/Redeploy need a token with write + deploy)."
+        : `Coolify API ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`,
+    );
     err.status = res.status;
     throw err;
   }
   return res.json();
 }
+
+/** Current Coolify docs use POST for actions; older versions used GET — retry with GET if POST isn't allowed. */
+async function action(path) {
+  try {
+    return await api(path, 'POST');
+  } catch (err) {
+    if (err.status === 405 || err.status === 404) return api(path, 'GET');
+    throw err;
+  }
+}
+
+/**
+ * Runs a control action on an application. `kind` is 'restart',
+ * 'redeploy', 'stop' or 'start'. Resolves with the deployment uuid Coolify
+ * queued for it (restart/redeploy/start), or null (stop).
+ */
+export async function controlApplication(appUuid, kind) {
+  const uuid = encodeURIComponent(appUuid);
+  switch (kind) {
+    case 'restart':
+      return (await action(`/applications/${uuid}/restart`))?.deployment_uuid ?? null;
+    case 'start':
+      return (await action(`/applications/${uuid}/start`))?.deployment_uuid ?? null;
+    case 'stop':
+      await action(`/applications/${uuid}/stop`);
+      return null;
+    case 'redeploy': {
+      const data = await action(`/deploy?uuid=${uuid}`);
+      return data?.deployments?.[0]?.deployment_uuid ?? null;
+    }
+    default:
+      throw new Error(`Unknown action ${kind}`);
+  }
+}
+
+/** Status of one deployment ('queued', 'in_progress', 'finished', 'failed', 'cancelled-by-user'), or null if unknown. */
+export async function getDeploymentStatus(deploymentUuid) {
+  return (await api(`/deployments/${encodeURIComponent(deploymentUuid)}`).catch(() => null))?.status ?? null;
+}
+
+/** Last `lines` lines of an application's container logs, with terminal colour codes stripped. */
+export async function getApplicationLogs(appUuid, lines = 30) {
+  const data = await api(`/applications/${encodeURIComponent(appUuid)}/logs?lines=${lines}`);
+  // eslint-disable-next-line no-control-regex
+  return String(data?.logs ?? '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trimEnd();
+}
+
+export { DONE_STATUSES };
 
 /** 'https://github.com/Owner/Repo.git', 'git@github.com:Owner/Repo', 'Owner/Repo' -> 'owner/repo' */
 function normalizeRepo(value) {

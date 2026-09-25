@@ -70,6 +70,7 @@ import { handleSetLogChannel, handleSetStudioLogChannel } from './log-channel-ha
 import { initLogChannel } from './log-channel.js';
 import { startNotifyServer } from './notify-server.js';
 import { registerCommands } from './register-commands.js';
+import { handleCoolifyControl } from './coolify-controls.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -232,6 +233,11 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    // Per-app controls opened from Server Status (dropdown, Logs, Restart/Redeploy/Stop/Start + confirms).
+    if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('coolify:')) {
+      return handleCoolifyControl(interaction);
     }
 
     // Session panel under the welcome message. Show Changes reuses SHOW_CHANGES_BUTTON_ID (routed above).

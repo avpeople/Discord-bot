@@ -44,6 +44,7 @@ import {
 import { parseRepoSlug } from '../github.js';
 import { pendingChanges, snapshotWorkingTree, restoreWorkingTree } from '../repo.js';
 import * as coolify from '../coolify.js';
+import { STATUS_DIVIDER, decorateResources, describeResource, buildAppSelectRow } from '../coolify-view.js';
 import { downloadAttachments } from './attachments.js';
 import { logEvent } from '../log-channel.js';
 
@@ -462,10 +463,9 @@ export async function handleCodeModel(interaction, sessionManager) {
 }
 
 /**
- * Commit button on a reply — commits, opens a PR, and merges it into the
- * default branch. Collapses this message's row to a disabled "Committed"
- * button (keeping a fresh, still-live Exit button) so it can't be clicked
- * again from here.
+ * Push Live — commits, opens a PR with a Claude-written title, and merges
+ * it into the default branch. From a reply's row it collapses that row to a
+ * disabled "Pushed Live ✓"; from the session panel it leaves the panel alone.
  */
 export async function handleCommitButton(interaction, sessionManager) {
   const session = sessionManager.getByChannel(interaction.channelId);
@@ -480,6 +480,10 @@ export async function handleCommitButton(interaction, sessionManager) {
     });
     return;
   }
+  if (session.pushing) {
+    await interaction.reply({ content: '⏳ Already pushing live — hang on.', flags: MessageFlags.Ephemeral });
+    return;
+  }
 
   if (interaction.customId === PANEL_COMMIT_BUTTON_ID) {
     // From the session panel: leave the panel's buttons alone, just acknowledge.
@@ -487,6 +491,8 @@ export async function handleCommitButton(interaction, sessionManager) {
   } else {
     await interaction.update({ components: [buildPostReplyRow({ used: 'commit' })] });
   }
+
+  session.pushing = true;
   try {
     const mergeStartedAt = Date.now();
     const outcome = await sessionManager.commitAndMerge(session);
@@ -495,7 +501,7 @@ export async function handleCommitButton(interaction, sessionManager) {
       return;
     }
     await interaction.followUp({
-      content: `✅ Pushed live — merged **${outcome.pr.html_url}** into \`${session.defaultBranch}\`.`,
+      content: `✅ Pushed live: **${outcome.pr.title}**\n-# Merged ${outcome.pr.html_url} into \`${session.defaultBranch}\``,
       components: [buildRevertRow(outcome.pr.number)],
     });
     logEvent(
@@ -506,6 +512,8 @@ export async function handleCommitButton(interaction, sessionManager) {
   } catch (err) {
     console.error(err);
     await interaction.followUp(`❌ Push Live failed: ${err.message}`.slice(0, 2000));
+  } finally {
+    session.pushing = false;
   }
 }
 
@@ -683,10 +691,10 @@ function refreshRow(customId) {
  * or the same message again when it came from that reply's own Refresh
  * button. Shared by the sessions and Coolify status views.
  */
-async function sendStatusReply(interaction, baseCustomId, content) {
+async function sendStatusReply(interaction, baseCustomId, content, extraRows = []) {
   await interaction.editReply({
     content: `${content.slice(0, 1900)}\n-# Updated <t:${Math.floor(Date.now() / 1000)}:R>`,
-    components: [refreshRow(baseCustomId)],
+    components: [...extraRows.filter(Boolean), refreshRow(baseCustomId)],
     allowedMentions: { parse: [] },
   });
 }
@@ -736,8 +744,6 @@ export async function handleCodeStatus(interaction, sessionManager) {
   );
 }
 
-// Discord messages don't render Markdown horizontal rules, so a run of box-drawing characters stands in.
-const STATUS_DIVIDER = '─'.repeat(28);
 // Matches the idle warning in session.js (4h auto-close, warned 15 minutes before).
 const IDLE_WARNING_AT_MS = (4 * 60 - 15) * 60 * 1000;
 
@@ -747,76 +753,6 @@ async function deferStatus(interaction) {
     await interaction.deferUpdate();
   } else {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  }
-}
-
-// Coolify reports status as 'state:health' (e.g. 'running:healthy', 'exited:unhealthy').
-function coolifyStatusIcon(status) {
-  const [state = '', health = ''] = String(status ?? '').toLowerCase().split(/[:()\s]+/);
-  if (state.startsWith('running')) return health === 'unhealthy' ? '🟡' : '🟢';
-  if (state.startsWith('degraded')) return '🟡';
-  if (state.startsWith('restarting') || state.startsWith('starting')) return '🟠';
-  if (state.startsWith('exited') || state.startsWith('stopped') || state.startsWith('dead')) return '🔴';
-  return '⚪';
-}
-
-/**
- * Readable labels for Coolify resources. Coolify names things like
- * 'live.nz:main-u14d84x6bi7xactgxnmlk87d' (name:branch-uuid) or
- * 'postgresql-database-vktj5awb3hjtynjlasr0uhya' (name-uuid): the random
- * id is dropped and the branch shown separately -> '**live.nz** · `main`'.
- * If two labels still collide (e.g. two 'postgresql-database'), each gets
- * the first 4 characters of its id to tell them apart.
- */
-function labelCoolifyResources(resources) {
-  const parsed = resources.map((r) => {
-    let name = String(r.name);
-    if (r.uuid) name = name.replace(new RegExp(`-?${r.uuid}$`), '');
-    name = name.replace(/-[a-z0-9]{20,}$/, ''); // any id Coolify appended without uuid matching exactly
-    const [base, branch] = name.split(':');
-    return { ...r, base: base || name, branch: branch || null };
-  });
-  const key = (p) => `${p.kind}|${p.base}|${p.branch}`;
-  const counts = new Map();
-  for (const p of parsed) counts.set(key(p), (counts.get(key(p)) ?? 0) + 1);
-  return parsed.map((p) => {
-    const shortId = counts.get(key(p)) > 1 && p.uuid ? ` _(${p.uuid.slice(0, 4)})_` : '';
-    return { ...p, label: `**${p.base}**${p.branch ? ` · \`${p.branch}\`` : ''}${shortId}` };
-  });
-}
-
-/** 'running:healthy' -> 'healthy', 'running:unknown' -> 'running' (no health check), 'exited:unhealthy' -> 'stopped'. */
-function friendlyCoolifyStatus(status) {
-  if (!status) return 'no status reported';
-  const [state = '', health = ''] = String(status).toLowerCase().split(/[:()\s]+/);
-  if (state.startsWith('running')) return health === 'healthy' ? 'healthy' : health === 'unhealthy' ? 'running but unhealthy' : 'running';
-  if (state.startsWith('exited') || state.startsWith('stopped') || state.startsWith('dead')) return 'stopped';
-  if (state.startsWith('restarting')) return 'restarting';
-  if (state.startsWith('starting')) return 'starting';
-  if (state.startsWith('degraded')) return 'degraded (some containers down)';
-  return state || status;
-}
-
-/**
- * 'Deployed 2 hours ago' (a Discord relative timestamp, which keeps itself
- * up to date in the client), or a note if the latest deploy failed or is
- * still running. '' for things with no deploys (e.g. databases).
- */
-function describeLastDeploy(lastDeploy) {
-  if (!lastDeploy?.at) return '';
-  const when = `<t:${Math.floor(lastDeploy.at / 1000)}:R>`;
-  switch (lastDeploy.status) {
-    case 'finished':
-      return `Deployed ${when}`;
-    case 'failed':
-      return `❌ Last deploy failed ${when}`;
-    case 'cancelled-by-user':
-      return `Last deploy cancelled ${when}`;
-    case 'queued':
-    case 'in_progress':
-      return `Deploying now (started ${when})`;
-    default:
-      return `Last deploy ${when}`;
   }
 }
 
@@ -846,25 +782,12 @@ export async function handleCoolifyStatus(interaction) {
       await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, "Coolify didn't return anything — check the API token's permissions.");
       return;
     }
-    const items = labelCoolifyResources(resources).map((r) => {
-      const deployFailed = r.lastDeploy?.status === 'failed';
-      const deploying = r.lastDeploy?.status === 'queued' || r.lastDeploy?.status === 'in_progress';
-      let icon = coolifyStatusIcon(r.status);
-      // A failed last deploy means the old version is still running — worth flagging even if it's up.
-      if (deployFailed && icon === '🟢') icon = '🟡';
-      // Mid-deploy, the hammer takes the status circle's place (the problem check below uses the real status).
-      return { ...r, deployFailed, statusIcon: icon, icon: deploying ? '🔨' : icon };
-    });
+    const items = decorateResources(resources);
     const byName = (a, b) => a.label.localeCompare(b.label);
     const problems = items.filter((r) => (r.status && r.statusIcon !== '🟢') || r.deployFailed).sort(byName);
     const fine = items.filter((r) => !problems.includes(r));
-    // Name on the first line, then each detail on its own line in Discord's small grey subtext (`-# `).
-    const line = (r) => {
-      const deploy = describeLastDeploy(r.lastDeploy);
-      return [`${r.icon} ${r.label}`, `-# Status: ${friendlyCoolifyStatus(r.status)}`, ...(deploy ? [`-# ${deploy}`] : [])].join('\n');
-    };
     // Lines above, between and below the items, so each one sits in its own box.
-    const list = (group) => `${STATUS_DIVIDER}\n${group.map(line).join(`\n${STATUS_DIVIDER}\n`)}\n${STATUS_DIVIDER}`;
+    const list = (group) => `${STATUS_DIVIDER}\n${group.map(describeResource).join(`\n${STATUS_DIVIDER}\n`)}\n${STATUS_DIVIDER}`;
 
     const sections = [
       problems.length > 0
@@ -875,7 +798,7 @@ export async function handleCoolifyStatus(interaction) {
       const group = fine.filter((r) => r.kind === kind).sort(byName);
       if (group.length > 0) sections.push(`**${heading}**\n${list(group)}`);
     }
-    await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, sections.join('\n\n'));
+    await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, sections.join('\n\n'), [buildAppSelectRow(items)]);
   } catch (err) {
     console.error('Coolify status failed:', err);
     await sendStatusReply(interaction, COOLIFY_STATUS_BUTTON_ID, `❌ Couldn't reach Coolify: ${err.message}`);
@@ -1014,10 +937,16 @@ export async function handleClosePushButton(interaction, sessionManager) {
     return;
   }
 
+  if (session.pushing) {
+    await interaction.reply({ content: '⏳ Already pushing live — hang on.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   await interaction.update({ content: '🚀 Pushing live and closing...', components: [] });
+  session.pushing = true;
   try {
     const mergeStartedAt = Date.now();
-    const outcome = await sessionManager.commitAndMerge(session, `Claude Code session ${session.id} (final)`);
+    const outcome = await sessionManager.commitAndMerge(session);
     if (outcome) {
       logEvent(
         interaction.guildId,
@@ -1030,13 +959,15 @@ export async function handleClosePushButton(interaction, sessionManager) {
 
     await interaction.channel.send(
       outcome
-        ? `✅ Pushed live — merged **${outcome.pr.html_url}**. This channel will be removed shortly.`
+        ? `✅ Pushed live: **${outcome.pr.title}** (${outcome.pr.html_url}). This channel will be removed shortly.`
         : '✅ Closed — nothing to commit. This channel will be removed shortly.',
     );
     await deleteChannelSoon(interaction.channel);
   } catch (err) {
     console.error(err);
     await interaction.channel.send(`❌ Failed to close session: ${err.message}`.slice(0, 2000));
+  } finally {
+    session.pushing = false;
   }
 }
 
