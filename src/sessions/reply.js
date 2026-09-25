@@ -27,8 +27,17 @@ const MAX_OPTIONS = 5;
  * positives on unrelated "I can't do X" sentences.
  */
 export function looksLikeBashUnavailableClaim(replyText) {
-  return /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
-    replyText,
+  // Pattern A: "bash/shell ... isn't/aren't/not ... available/enabled/possible"
+  //   e.g. "Bash isn't available in this environment"
+  // Pattern B: "no shell/bash access/tool" — a distinct phrasing that
+  //   doesn't fit pattern A's word order at all (confirmed live: "this
+  //   environment has no shell access" matched neither the old pattern
+  //   nor a reworded version of it, so this is a separate alternative
+  //   rather than a tweak to pattern A).
+  return (
+    /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
+      replyText,
+    ) || /\bno\b[^.!?\n]{0,20}\b(bash|shell)\b[^.!?\n]{0,20}\b(access|tool)\b/i.test(replyText)
   );
 }
 
