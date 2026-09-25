@@ -1,6 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { listAccessibleRepos } from '../github.js';
-import * as coolify from '../coolify.js';
 import { SESSIONS_STATUS_BUTTON_ID, COOLIFY_STATUS_BUTTON_ID } from './reply.js';
 
 export const REPO_SELECT_ID = 'claude-session:repo-select';
@@ -52,15 +51,15 @@ export async function buildRepoPickerReply(selectId = REPO_SELECT_ID) {
   };
 }
 
-/** Session Status (always) and Server Status (only if Coolify is configured) buttons under the picker. */
+/**
+ * Open Sessions and Server Status buttons under the picker. Server Status
+ * always shows — if Coolify isn't configured, clicking it says which
+ * setting is missing (see handleCoolifyStatus), which is easier to spot
+ * than a button that silently isn't there.
+ */
 function buildStatusButtonsRow() {
-  const row = new ActionRowBuilder().addComponents(
+  return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(SESSIONS_STATUS_BUTTON_ID).setLabel('Open Sessions').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(COOLIFY_STATUS_BUTTON_ID).setLabel('Server Status').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
   );
-  if (coolify.isConfigured()) {
-    row.addComponents(
-      new ButtonBuilder().setCustomId(COOLIFY_STATUS_BUTTON_ID).setLabel('Server Status').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
-    );
-  }
-  return row;
 }

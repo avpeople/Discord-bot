@@ -721,7 +721,15 @@ function coolifyStatusIcon(status) {
 export async function handleCoolifyStatus(interaction) {
   if (!hasAccess(interaction)) return replyNoAccess(interaction);
   if (!coolify.isConfigured()) {
-    await interaction.reply({ content: 'Coolify isn\'t set up — add COOLIFY_URL and COOLIFY_API_TOKEN to the bot.', flags: MessageFlags.Ephemeral });
+    const missing = [!config.coolify.url && '`COOLIFY_URL`', !config.coolify.apiToken && '`COOLIFY_API_TOKEN`'].filter(Boolean);
+    await interaction.reply({
+      content:
+        `🖥️ Server Status needs Coolify set up — the bot can't see ${missing.join(' or ')}.\n` +
+        'In Coolify: the bot app → **Environment Variables** → add ' +
+        '`COOLIFY_URL=http://coolify:8080` and `COOLIFY_API_TOKEN=<token>` ' +
+        '(make one under **Keys & Tokens → API tokens**), then **Redeploy**.',
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   await deferStatus(interaction);
