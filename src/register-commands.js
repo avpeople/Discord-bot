@@ -57,6 +57,14 @@ const commands = [
           opt.setName('channel').setDescription('The channel to log activity to').setRequired(true),
         ),
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-coolify-log-channel')
+        .setDescription('Set where every Coolify deployment on the server gets logged')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to log deployments to').setRequired(true),
+        ),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName('welcome')

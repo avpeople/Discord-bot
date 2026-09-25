@@ -66,7 +66,8 @@ import {
   resyncPickerChannel,
 } from './sessions/picker-channel-handlers.js';
 import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
-import { handleSetLogChannel, handleSetStudioLogChannel } from './log-channel-handlers.js';
+import { handleSetLogChannel, handleSetStudioLogChannel, handleSetCoolifyLogChannel } from './log-channel-handlers.js';
+import { startCoolifyMonitor } from './coolify-monitor.js';
 import { initLogChannel } from './log-channel.js';
 import { startNotifyServer } from './notify-server.js';
 import { registerCommands } from './register-commands.js';
@@ -118,6 +119,7 @@ client.once('ready', async () => {
   // Keep Discord's slash commands in sync with this deploy — no manual `npm run register` needed.
   await registerCommands().catch((err) => console.error('Failed to register slash commands:', err));
   initLogChannel(client);
+  startCoolifyMonitor(client);
   startNotifyServer();
 
   const restored = sessionManager.restore();
@@ -153,6 +155,7 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'init') return handleCodeInit(interaction, sessionManager);
       if (sub === 'set-picker-channel') return handleSetPickerChannel(interaction);
       if (sub === 'set-log-channel') return handleSetLogChannel(interaction);
+      if (sub === 'set-coolify-log-channel') return handleSetCoolifyLogChannel(interaction);
       return;
     }
 

@@ -32,6 +32,11 @@ export function handleSetLogChannel(interaction) {
   return handleSetLogChannelFor(interaction, 'activity', 'Session activity');
 }
 
+/** `/code set-coolify-log-channel` — designates a channel for every Coolify deployment (see coolify-monitor.js). */
+export function handleSetCoolifyLogChannel(interaction) {
+  return handleSetLogChannelFor(interaction, 'coolify', 'Coolify deployments');
+}
+
 /** `/studio set-log-channel` — designates a channel for studio/GFX monitoring events. */
 export function handleSetStudioLogChannel(interaction) {
   return handleSetLogChannelFor(interaction, 'studio', 'Studio events');

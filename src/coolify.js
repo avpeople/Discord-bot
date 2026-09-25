@@ -117,13 +117,18 @@ export async function findApplications(owner, repo, branch) {
   );
 }
 
-async function listDeployments(appUuid, take = 10) {
+/** All Coolify applications (raw API objects: uuid, name, status, git_repository, git_branch, ...). */
+export async function listApplications() {
+  return asList(await api('/applications'));
+}
+
+export async function listDeployments(appUuid, take = 10) {
   const data = await api(`/deployments/applications/${encodeURIComponent(appUuid)}?skip=0&take=${take}`);
   return Array.isArray(data) ? data : data.deployments ?? data.data ?? [];
 }
 
 /** Coolify timestamps can carry microseconds ('…:00.000000Z'); trim to milliseconds so Date parses them everywhere. */
-function parseTime(value) {
+export function parseTime(value) {
   if (!value) return null;
   const ms = Date.parse(String(value).replace(/(\.\d{3})\d+/, '$1'));
   return Number.isNaN(ms) ? null : ms;

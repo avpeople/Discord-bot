@@ -136,6 +136,14 @@ or it runs past 30. From inside a Coolify-deployed container
 `http://coolify:8080` usually reaches Coolify; otherwise use the
 dashboard's URL. See [src/coolify.js](src/coolify.js).
 
+**Deployment log.** `/code set-coolify-log-channel channel:#coolify-logs`
+makes the bot post every deployment on the Coolify server there —
+whatever started it (Push Live, a GitHub push, the dashboard, the
+Redeploy button). One message per deployment, edited as it goes: 🔨
+deploying → ✅ deployed (with how long it took) / ❌ failed (with the log
+tail) / ⚪ cancelled. It polls every 20 seconds and doesn't re-post history
+after a restart ([src/coolify-monitor.js](src/coolify-monitor.js)).
+
 **Server Status controls.** Under Server Status, the *Manage an app*
 dropdown opens that app privately with **📜 Logs** (last 30 lines),
 **🔄 Restart**, **🚀 Redeploy** and **⏹️ Stop** / **▶️ Start**, each behind
