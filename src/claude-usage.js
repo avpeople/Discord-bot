@@ -75,17 +75,19 @@ export async function getClaudeUsage() {
   return cached;
 }
 
-const BAR_WIDTH = 20;
+const BAR_WIDTH = 10;
 
-function bar(percent) {
-  const filled = Math.round((Math.min(Math.max(percent, 0), 100) / 100) * BAR_WIDTH);
-  return '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled);
+function fillEmoji(percent) {
+  if (percent >= 90) return '🟥';
+  if (percent >= 70) return '🟨';
+  return '🟩';
 }
 
-function dot(percent) {
-  if (percent >= 90) return '🔴';
-  if (percent >= 70) return '🟡';
-  return '🟢';
+// Emoji squares rather than █/░ so the bar looks the same on desktop and mobile.
+function bar(percent) {
+  const clamped = Math.min(Math.max(percent, 0), 100);
+  const filled = Math.round((clamped / 100) * BAR_WIDTH);
+  return fillEmoji(clamped).repeat(filled) + '⬛'.repeat(BAR_WIDTH - filled);
 }
 
 function formatWindow(label, w, resetStyle) {
@@ -95,7 +97,7 @@ function formatWindow(label, w, resetStyle) {
   const percent = w.resetsAt && !reset ? 0 : w.percent;
   const unix = reset ? Math.floor(reset / 1000) : null;
   const resetText = unix ? ` · resets <t:${unix}:${resetStyle}>` : '';
-  return `${dot(percent)} ${label}\n\`${bar(percent)}\` **${Math.round(percent)}%**${resetText}`;
+  return `**${label}**\n${bar(percent)} **${Math.round(percent)}%**${resetText}`;
 }
 
 /**
@@ -106,7 +108,7 @@ function formatWindow(label, w, resetStyle) {
 export function formatClaudeUsage(usage) {
   if (!usage) return '';
   const lines = [
-    '**Claude usage**',
+    '### Claude usage',
     formatWindow('Session (5-hour)', usage.fiveHour, 'R'),
     formatWindow('Weekly', usage.sevenDay, 'f'),
   ];
