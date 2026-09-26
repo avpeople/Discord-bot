@@ -63,8 +63,8 @@ const TABLE_MAX_CHARS = 3600; // leaves room for the header lines in the 4096-ch
 /**
  * The MediaMTX panel (its own channel): one row per stream in a monospace
  * table so the columns line up — a status dot (🟢 live, 🟡 low bitrate,
- * ⚫ offline), the name, whether it's going to the studio, and the bitrate
- * note when low. Only the leading dot is an emoji, so the text columns
+ * ⚫ offline), the name, IN (a feed publishing to it), OUT (the studio
+ * pulling it), and the bitrate note when low. Only the leading dot is an emoji, so the text columns
  * stay aligned. Live streams first, then offline.
  *
  * The site's live list is the current truth for "is it live" — the events
@@ -79,8 +79,9 @@ export function buildMediamtxMessage(mtx) {
 
   let studioCount = 0;
   let lowCount = 0;
+  // IN: a feed is publishing into the stream. OUT: the studio is pulling it (server → studio hop).
   const rows = ordered.map((p) => {
-    if (!p.live) return `⚫ ${pad(p.path, nameWidth)}  offline`;
+    if (!p.live) return `⚫ ${pad(p.path, nameWidth)}  ${pad('—', 6)}${pad('—', 10)}offline`;
     const warnings = Object.entries(p.hops).filter(([, h]) => h?.status === 'warning');
     const studio = p.hops['server-studio']?.status;
     const toStudio = studio === 'online' || studio === 'warning';
@@ -89,10 +90,10 @@ export function buildMediamtxMessage(mtx) {
     const note = warnings
       .map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`)
       .join(', ');
-    return `${warnings.length ? '🟡' : '🟢'} ${pad(p.path, nameWidth)}  ${pad(toStudio ? 'to studio' : 'live', 9)}${note ? `  ${note}` : ''}`.trimEnd();
+    return `${warnings.length ? '🟡' : '🟢'} ${pad(p.path, nameWidth)}  ${pad('▶ in', 6)}${pad(toStudio ? '▶ studio' : '—', 10)}${note}`.trimEnd();
   });
 
-  let table = `   ${pad('STREAM', nameWidth)}  STATUS`;
+  let table = `   ${pad('STREAM', nameWidth)}  ${pad('IN', 6)}OUT`;
   for (let i = 0; i < rows.length; i++) {
     if (table.length + rows[i].length + 20 > TABLE_MAX_CHARS) {
       table += `\n   +${rows.length - i} more`;
