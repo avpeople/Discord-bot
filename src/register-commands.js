@@ -120,46 +120,24 @@ const commands = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName('voice')
-    .setDescription('Bridge a Discord voice channel to a LiveKit channel (Coms server)')
+    .setDescription('Listen and talk on coms from a Discord voice channel')
     .addSubcommand((sub) =>
       sub
         .setName('join')
-        .setDescription('Bridge a voice channel to a LiveKit channel')
-        .addStringOption((opt) =>
-          opt.setName('room').setDescription('The LiveKit channel id to bridge to').setRequired(true),
-        )
+        .setDescription('Bridge a voice channel to a coms channel (listen always, talk with the panel button)')
         .addChannelOption((opt) =>
           opt
             .setName('channel')
             .setDescription('The Discord voice channel to bridge')
             .setRequired(true)
             .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+        )
+        .addStringOption((opt) =>
+          opt.setName('coms').setDescription('The coms channel').setRequired(true).setAutocomplete(true),
         ),
     )
-    .addSubcommand((sub) =>
-      sub
-        .setName('leave')
-        .setDescription('Disconnect a voice channel from its LiveKit bridge')
-        .addChannelOption((opt) =>
-          opt
-            .setName('channel')
-            .setDescription('The bridged Discord voice channel')
-            .setRequired(true)
-            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName('status')
-        .setDescription('Check whether a voice channel is currently bridged')
-        .addChannelOption((opt) =>
-          opt
-            .setName('channel')
-            .setDescription('The Discord voice channel to check')
-            .setRequired(true)
-            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
-        ),
-    )
+    .addSubcommand((sub) => sub.setName('leave').setDescription('Stop the coms bridge'))
+    .addSubcommand((sub) => sub.setName('status').setDescription("Show what the coms bridge is doing"))
     .toJSON(),
   new SlashCommandBuilder()
     .setName('studio')

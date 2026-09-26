@@ -62,7 +62,15 @@ import {
   isApproveButton,
   isDenyButton,
 } from './welcome/handlers.js';
-import { handleVoiceJoin, handleVoiceLeave, handleVoiceStatus } from './voice/handlers.js';
+import {
+  handleVoiceJoin,
+  handleVoiceLeave,
+  handleVoiceStatus,
+  handleVoiceAutocomplete,
+  handleComsButton,
+  isComsInteraction,
+  initComs,
+} from './coms/handlers.js';
 import {
   handleSetPickerChannel,
   handlePersistentRepoSelected,
@@ -89,7 +97,8 @@ import {
 } from './liveu/handlers.js';
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  // GuildVoiceStates: joining voice channels for the coms bridge, and seeing who's in them.
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Channel],
 });
 
@@ -137,6 +146,7 @@ client.once('ready', async () => {
   startCoolifyMonitor(client);
   startNotifyServer();
   startLiveuMonitor(client);
+  initComs();
 
   const restored = sessionManager.restore();
   if (restored.length > 0) {
@@ -189,6 +199,10 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'set-approval-channel') return handleWelcomeSetApprovalChannel(interaction);
       if (sub === 'post') return handleWelcomePost(interaction);
       return;
+    }
+
+    if (interaction.isAutocomplete() && interaction.commandName === 'voice') {
+      return handleVoiceAutocomplete(interaction);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'voice') {
@@ -263,6 +277,11 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    // Coms bridge panel: Talk / Leave.
+    if (interaction.isButton() && isComsInteraction(interaction.customId)) {
+      return handleComsButton(interaction);
     }
 
     // LiveU status board: Go Live / Stop (each with a confirm), the MediaMTX destination dropdown and its "Other…" modal.

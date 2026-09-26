@@ -23,11 +23,10 @@ services:
       # Coolify API (optional) — posts deploy progress after Commit merges
       COOLIFY_URL: ${COOLIFY_URL}
       COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN}
-      # Voice bridge (optional) — was missing from this file entirely before,
-      # so setting these in Coolify's UI alone never actually reached the
-      # container (Coolify only passes through what's referenced here).
-      BRIDGE_DISCORD_URL: ${BRIDGE_DISCORD_URL}
-      BRIDGE_DISCORD_API_KEY: ${BRIDGE_DISCORD_API_KEY}
+      # Coms bridge for /voice (optional) — see .env.example. Coolify only
+      # passes through env vars referenced here.
+      COMS_API_URL: ${COMS_API_URL}
+      COMS_BRIDGE_KEY: ${COMS_BRIDGE_KEY}
       # Inbound notify endpoint (optional) — see .env.example
       NOTIFY_API_KEY: ${NOTIFY_API_KEY}
       NOTIFY_PORT: ${NOTIFY_PORT:-8790}

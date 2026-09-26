@@ -41,11 +41,12 @@ export const config = {
     url: process.env.COOLIFY_URL || null,
     apiToken: process.env.COOLIFY_API_TOKEN || null,
   },
-  // Optional: the bridge-discord control API (see the Coms server repo's
-  // bridge-discord/README.md). /voice is disabled entirely if unset.
-  bridgeDiscord: {
-    url: process.env.BRIDGE_DISCORD_URL || null,
-    apiKey: process.env.BRIDGE_DISCORD_API_KEY || null,
+  // Optional: the AVP coms server, for /voice (Discord voice ↔ coms). The
+  // bot joins as a bridge: create one in the coms admin console (Bridges
+  // tab) and use its key. /voice is disabled entirely if unset.
+  coms: {
+    apiUrl: process.env.COMS_API_URL || null,
+    bridgeKey: process.env.COMS_BRIDGE_KEY || null,
   },
   // Optional: inbound HTTP endpoint external services (e.g. the Sports
   // GFX site) call to post a studio-monitoring log line. Disabled

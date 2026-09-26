@@ -177,7 +177,6 @@ makes the bot post one line per significant event to that channel:
   Push-then-close
 - 🔴 a session is closed (exit or push-then-close) / ⏱️ auto-closed by the
   4-hour idle timeout
-- 🔊 / 🔇 a voice bridge is started or stopped (`/voice join` / `/voice leave`)
 
 Logging is best-effort ([src/log-channel.js](src/log-channel.js)) — if no
 log channel is set, or the bot can't reach it for any reason, it silently
@@ -383,39 +382,31 @@ If you'd rather not deal with re-authenticating on a headless server, set
 `ANTHROPIC_API_KEY` instead (API billing, no login step needed) — the bot
 picks it up automatically and skips subscription auth.
 
-## Voice bridge (Discord ↔ LiveKit, optional)
+## Coms bridge (`/voice`, optional)
 
-`/voice join room:<liveKitChannelId> channel:#voice` bridges a Discord
-voice channel to a LiveKit channel two-way, via a separate service —
-`bridge-discord`, in the Coms server repo (`bridge-discord/README.md`
-there is the authoritative reference for how it works and its exact
-control API). This bot's [src/voice/](src/voice) is just a thin client
-that tells that service to start/stop a pairing; it does no audio work
-itself.
+Listen and talk on AVP coms from a Discord voice channel. The bot does the
+audio itself ([src/coms/](src/coms/)): it joins the Discord voice channel
+and the coms channel's LiveKit room, and mixes audio both ways.
 
-- `/voice join room:<id> channel:#voice` — starts a pairing, keyed by the
-  Discord voice channel's id (so joining the same channel twice targets
-  the same pairing rather than creating a duplicate).
-- `/voice leave channel:#voice` — stops it.
-- `/voice status channel:#voice` — checks whether a channel is currently
-  bridged and each side's connection state.
+- **Setup**: in the coms admin console, Bridges tab, create a bridge (e.g.
+  "Discord") and copy its key. Set `COMS_API_URL` (the coms API, e.g.
+  `https://api-com.avp.nz`) and `COMS_BRIDGE_KEY`. The bot then shows as
+  an online bridge in the admin console.
+- `/voice join channel:#voice coms:<channel>` (Manage Channels) — the coms
+  channel is picked from a list. Posts a control panel in the voice
+  channel's chat: who's on coms, and **Talk** / **Leave** buttons.
+- **Listen** is always on: everyone in the voice channel hears coms.
+  **Talk** sends the voice channel's speakers out on coms while it's on —
+  off by default so Discord chatter can't leak onto coms. Only people in
+  the voice channel (or channel managers) can press the buttons.
+- `/voice leave`, `/voice status`. The bridge also leaves by itself after
+  2 minutes with nobody in the voice channel.
+- One bridge per server (Discord allows a bot in one voice channel per
+  server). Starting, stopping and Talk on/off are logged to the studio log.
 
-All three require **Manage Channels** — separate from `ALLOWED_ROLE_ID`
-and Manage Roles, since this is infra-level, not session or role access.
-
-Set `BRIDGE_DISCORD_URL` (and `BRIDGE_DISCORD_API_KEY` if that service has
-one configured) to enable `/voice` — leave both unset and it's disabled
-with a clear message rather than erroring. Deploy `bridge-discord` itself
-separately (its own README covers that); this bot never runs voice
-audio in-process.
-
-**Status**: the control API client
-([src/voice/bridge-client.js](src/voice/bridge-client.js)) is verified
-against a mock server matching the documented contract exactly (create,
-duplicate-id error, get, leave, idempotent re-leave). The actual
-`bridge-discord` service it talks to has not been tested against live
-Discord/LiveKit traffic as of this writing — see its own README's status
-section before relying on this in production.
+Audio is 48 kHz stereo end to end (no resampling): Discord's Opus is
+decoded, speakers mixed, and published as one LiveKit track; every coms
+track is mixed and played into Discord. Neither side hears itself back.
 
 ## Notes / things to tune
 

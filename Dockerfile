@@ -1,4 +1,5 @@
-FROM node:20-slim
+# Node 22.12+: required by @discordjs/voice (the /voice coms bridge).
+FROM node:22-slim
 
 # git is needed for repo operations; ca-certificates for HTTPS clone. The
 # rest are common tools Claude may reach for via Bash (Python, build tools,
