@@ -1,8 +1,10 @@
 import * as liveu from './client.js';
+import * as mtx from '../mediamtx/client.js';
 import { buildSnapshot } from './parse.js';
 import { allLiveuConfigs, lowBitrateKbps, updateLiveuConfig } from './store.js';
-import { buildSummaryMessage, buildUnitMessage, formatBitrate, messageKey } from './view.js';
+import { buildMediamtxMessage, buildSummaryMessage, buildUnitMessage, formatBitrate, messageKey } from './view.js';
 import { logEvent } from '../log-channel.js';
+import { describeEvent, mediamtxState, pollMediamtx } from '../mediamtx/state.js';
 
 /**
  * Polls LiveU every POLL_INTERVAL_MS and:
@@ -10,11 +12,14 @@ import { logEvent } from '../log-channel.js';
  *    message per unit, edited in place, only when something changed), and
  *  - posts changes to the guild's studio log (`/studio set-log-channel`):
  *    unit online/offline, went live/stopped, video input lost/back, SIM
- *    dropped/connected, bitrate below the alert threshold/recovered.
+ *    dropped/connected, bitrate below the alert threshold/recovered — plus
+ *    the media-mtx site's stream events (see mediamtx/state.js), and
+ *  - keeps each guild's MediaMTX panel (its own channel) up to date; the
+ *    site's streams also feed each LiveU box's destination dropdown.
  *
  * The first poll after boot only records the current state, so a restart
- * doesn't re-announce everything. Does nothing unless LIVEU_EMAIL /
- * LIVEU_PASSWORD are set.
+ * doesn't re-announce everything. Does nothing unless LiveU or the
+ * media-mtx site is configured.
  */
 
 const POLL_INTERVAL_MS = 15_000;
@@ -134,19 +139,21 @@ function bitrateEvent(guildId, snap) {
     : `📈 **${snap.name}** bitrate recovered: ${formatBitrate(snap.totalKbps)}`;
 }
 
-async function logEvents(snapshots) {
+/** `snapshots` is null when LiveU didn't answer this poll — then only the media-mtx events are logged. */
+async function logEvents(snapshots, mtxEvents) {
   const shared = [];
-  if (!firstPoll) {
+  if (snapshots && !firstPoll) {
     for (const snap of snapshots) shared.push(...stateEvents(previous.get(snap.id), snap));
     const nextIds = new Set(snapshots.map((s) => s.id));
     for (const [id, snap] of previous) {
       if (!nextIds.has(id)) shared.push(`🗑️ LiveU **${snap.name}** removed from the account`);
     }
   }
+  shared.push(...mtxEvents.map(describeEvent));
 
   for (const guild of client.guilds.cache.values()) {
     const lines = [...shared];
-    for (const snap of snapshots) {
+    for (const snap of snapshots ?? []) {
       const event = bitrateEvent(guild.id, snap);
       if (event && !firstPoll) lines.push(event);
     }
@@ -188,33 +195,56 @@ export function renderPanel(guildId, snapshots, error = null) {
   return run;
 }
 
+/**
+ * Posts or edits a single standing message (the board summary, the
+ * MediaMTX panel), refreshing it at least every SUMMARY_REFRESH_MS so its
+ * "updated" time stays honest. Returns the message id to remember.
+ */
+async function upsertStandingMessage(channel, messageId, payload, refreshKey) {
+  const message = await fetchMessage(channel, messageId);
+  if (!message) {
+    const sent = await channel.send(payload);
+    renderedKeys.set(sent.id, messageKey(payload));
+    summaryEditedAt.set(refreshKey, Date.now());
+    return sent.id;
+  }
+  const stale = Date.now() - (summaryEditedAt.get(refreshKey) ?? 0) > SUMMARY_REFRESH_MS;
+  await editIfChanged(message, payload, stale);
+  if (stale) summaryEditedAt.set(refreshKey, Date.now());
+  return message.id;
+}
+
 async function renderPanelNow(guildId, snapshots, error) {
   const cfg = allLiveuConfigs()[guildId];
-  if (!cfg?.channelId) return;
+  if (!cfg) return;
+  const mtx = mediamtxState();
+  if (cfg.mtxChannelId && mtx.configured) await renderMediamtxPanel(guildId, cfg, mtx);
+  if (cfg.channelId) await renderLiveuBoard(guildId, cfg, snapshots, error, mtx);
+}
+
+/** The MediaMTX panel: one message in its own channel (`/studio set-mediamtx-channel`). */
+async function renderMediamtxPanel(guildId, cfg, mtx) {
+  const channel = await client.channels.fetch(cfg.mtxChannelId).catch(() => null);
+  if (!channel) return;
+  const messageId = await upsertStandingMessage(channel, cfg.mtxMessageId, buildMediamtxMessage(mtx), `${guildId}:mtx`);
+  if (messageId !== cfg.mtxMessageId) updateLiveuConfig(guildId, { mtxMessageId: messageId });
+}
+
+async function renderLiveuBoard(guildId, cfg, snapshots, error, mtx) {
   const channel = await client.channels.fetch(cfg.channelId).catch(() => null);
   if (!channel) return;
 
-  const summaryPayload = buildSummaryMessage(snapshots, error);
-  let summary = await fetchMessage(channel, cfg.summaryMessageId);
-  if (!summary) {
-    summary = await channel.send(summaryPayload);
-    renderedKeys.set(summary.id, messageKey(summaryPayload));
-    summaryEditedAt.set(guildId, Date.now());
-    updateLiveuConfig(guildId, { summaryMessageId: summary.id });
-  } else {
-    const stale = Date.now() - (summaryEditedAt.get(guildId) ?? 0) > SUMMARY_REFRESH_MS;
-    await editIfChanged(summary, summaryPayload, stale);
-    if (stale) summaryEditedAt.set(guildId, Date.now());
-  }
+  const summaryId = await upsertStandingMessage(channel, cfg.summaryMessageId, buildSummaryMessage(snapshots, error), guildId);
+  if (summaryId !== cfg.summaryMessageId) updateLiveuConfig(guildId, { summaryMessageId: summaryId });
 
   // On an API error, keep showing the last known unit boxes rather than blanking them.
   if (error) return;
 
-  // Only online/live units get a box; offline ones are just named in the summary.
+  // Only online/live units get a box; offline ones are just counted in the summary.
   const shown = snapshots.filter((s) => s.state !== 'offline');
   const unitMessages = { ...cfg.unitMessages };
   for (const snap of shown) {
-    const payload = buildUnitMessage(snap);
+    const payload = buildUnitMessage(snap, mtx);
     const message = await fetchMessage(channel, unitMessages[snap.id]);
     if (message) {
       await editIfChanged(message, payload);
@@ -244,16 +274,21 @@ async function renderAll(snapshots, error) {
 }
 
 async function poll() {
-  let snapshots;
-  try {
-    snapshots = await collectSnapshots();
-  } catch (err) {
-    console.error('[liveu] poll failed:', err.message);
-    await renderAll(latest, err.message);
-    return;
+  const mtxEvents = await pollMediamtx();
+
+  let snapshots = [];
+  if (liveu.isConfigured()) {
+    try {
+      snapshots = await collectSnapshots();
+    } catch (err) {
+      console.error('[liveu] poll failed:', err.message);
+      await logEvents(null, mtxEvents);
+      await renderAll(latest, err.message);
+      return;
+    }
   }
 
-  await logEvents(snapshots);
+  await logEvents(snapshots, mtxEvents);
   previous = new Map(snapshots.map((s) => [s.id, s]));
   latest = snapshots;
   firstPoll = false;
@@ -284,8 +319,8 @@ export function pollNow() {
 export function startLiveuMonitor(discordClient) {
   if (started) return;
   client = discordClient;
-  if (!liveu.isConfigured()) {
-    console.log('LIVEU_EMAIL / LIVEU_PASSWORD not set — LiveU monitoring disabled.');
+  if (!liveu.isConfigured() && !mtx.isConfigured() && !mtx.eventsConfigured()) {
+    console.log('Neither LiveU nor the media-mtx site is configured — studio board monitoring disabled.');
     return;
   }
   started = true;

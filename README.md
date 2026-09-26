@@ -242,6 +242,25 @@ bot polls LiveU every 15s ([src/liveu/](src/liveu/)):
   shows `—` or looks wrong, compare against the raw dump and add the real
   field name there.
 
+### MediaMTX
+
+With the AVP media-mtx site configured ([src/mediamtx/](src/mediamtx/),
+same endpoints as the Rugby GFX site and Studio Patch):
+
+- `/studio set-mediamtx-channel channel:#mediamtx` — a panel in its own
+  channel: each stream, live or not, with its Cam → server and server →
+  studio status (🟢 ok, 🟡 low bitrate with the Mbps, 🔴 offline).
+- `MEDIAMTX_URL` / `MEDIAMTX_USERNAME` / `MEDIAMTX_PASSWORD` — the stream
+  list for that panel, and each LiveU box gets a **Set destination
+  → MediaMTX stream** dropdown (live streams first, plus **Other…** to
+  type a name). Picking one creates an SRT destination
+  `<srtAddress>?streamid=publish:<stream>` and selects it on the unit, so
+  the next Go Live streams there. Disabled while the unit is live. Each
+  pick adds a destination to the LiveU account, like Studio Patch does.
+- `MEDIAMTX_EVENTS_API_KEY` (created on the site's Events page) — stream
+  online/offline and low-bitrate/recovered events go to the studio log,
+  and the panel's per-hop Cam / Studio status comes from these.
+
 ## Welcome panel (role requests)
 
 Separate from the Claude Code sessions: `/welcome` manages a self-serve

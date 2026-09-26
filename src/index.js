@@ -81,6 +81,7 @@ import { startLiveuMonitor } from './liveu/monitor.js';
 import { initSignalEmojis } from './liveu/signal-emojis.js';
 import {
   handleSetLiveuChannel,
+  handleSetMediamtxChannel,
   handleLiveuAlertBitrate,
   handleLiveuRaw,
   handleLiveuInteraction,
@@ -202,6 +203,7 @@ client.on('interactionCreate', async (interaction) => {
       const sub = interaction.options.getSubcommand();
       if (sub === 'set-log-channel') return handleSetStudioLogChannel(interaction);
       if (sub === 'set-liveu-channel') return handleSetLiveuChannel(interaction);
+      if (sub === 'set-mediamtx-channel') return handleSetMediamtxChannel(interaction);
       if (sub === 'liveu-alert-bitrate') return handleLiveuAlertBitrate(interaction);
       if (sub === 'liveu-raw') return handleLiveuRaw(interaction);
       return;
@@ -263,8 +265,11 @@ client.on('interactionCreate', async (interaction) => {
       return handleFreshStartButton(interaction, sessionManager);
     }
 
-    // LiveU status board: Go Live and Stop, each with a confirm step.
-    if (interaction.isButton() && isLiveuInteraction(interaction.customId)) {
+    // LiveU status board: Go Live / Stop (each with a confirm), the MediaMTX destination dropdown and its "Other…" modal.
+    if (
+      (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+      isLiveuInteraction(interaction.customId)
+    ) {
       return handleLiveuInteraction(interaction);
     }
 

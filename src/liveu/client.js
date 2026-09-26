@@ -150,6 +150,77 @@ export async function getDestinations(bossId) {
   return data?.data?.response ?? [];
 }
 
+const soloPost = (path, body) => request(`${SOLO_API_BASE}${path}`, { method: 'POST', body: JSON.stringify(body) });
+
+/**
+ * Points a unit at an SRT caller destination and makes it the one Go Live
+ * streams to — the same three calls the Studio Patch app makes when a
+ * MediaMTX stream is applied to a LiveU: link it to the unit on the Solo
+ * API, create it in the LiveU Central inventory (the shared external_id
+ * ties the two together), then select it on the unit.
+ *
+ * Each call creates a new destination on the account, like Studio Patch
+ * does; old ones can be tidied up in the Solo portal.
+ */
+export async function setSrtDestination(bossId, { title, url, streamId, latencyMs = 1000, profile = 'SRT-Out solo h265 1080p50/60' }) {
+  const externalId = randomUUID();
+  const provider = 'SRT-OUT-Caller-Solo';
+
+  await soloPost('/destination', {
+    destination_id: externalId,
+    unit_id: bossId,
+    title,
+    type: 'stream',
+    provider,
+    profileSelected: profile,
+    pri_url: url,
+    streamname: streamId,
+    latency: String(latencyMs),
+  });
+
+  const email = encodeURIComponent(config.liveu.email);
+  const created = await central(`/inventories/${email}/destinations?overwrite=true`, {
+    method: 'POST',
+    body: JSON.stringify({
+      destination: {
+        name: title,
+        type: 'stream',
+        streaming_destination: {
+          external_id: externalId,
+          streaming_provider: provider,
+          streaming_destination_outputs: [
+            {
+              streaming_profile: profile,
+              stream_name: streamId,
+              min_res_override: '',
+              max_res_override: '',
+              min_fps_override: '',
+              max_fps_override: '',
+              min_bitrate_override: '',
+              max_bitrate_override: '',
+              audio_bitrate_override: '',
+            },
+          ],
+          streaming_ingest: {
+            username: '',
+            password: '',
+            primary_url: url,
+            secondary_url: '',
+            streamingSrt: { mode: 'caller', latency: String(latencyMs), passphrase: '' },
+          },
+        },
+      },
+    }),
+  });
+
+  const destId = created?.data?.destination?.id ?? created?.data?.id ?? created?.id ?? null;
+  if (!destId) throw new Error('LiveU created the destination but returned no id to select it with.');
+  await central(`/units/${encodeURIComponent(bossId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ unit: { selected_destination: String(destId) } }),
+  });
+}
+
 // Same calls the Studio Patch app's Start/Stop Stream buttons use. Go Live
 // streams to the unit's currently selected destination (see getStream).
 

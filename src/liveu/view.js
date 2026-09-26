@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } from 'discord.js';
 import { signalEmoji } from './signal-emojis.js';
 
 /**
@@ -8,6 +8,9 @@ import { signalEmoji } from './signal-emojis.js';
 
 export const GO_LIVE_PREFIX = 'liveu:go-live:';
 export const STOP_PREFIX = 'liveu:stop:';
+export const MTX_SELECT_PREFIX = 'liveu:mtx:';
+// The dropdown's "type a stream name" entry, for a stream that isn't live yet.
+export const MTX_OTHER_VALUE = '__other__';
 
 const STATE_STYLE = {
   live: { icon: '🔴', label: 'LIVE', color: 0xed4245 },
@@ -41,6 +44,43 @@ function simLine(sim) {
   return `${icon} **${sim.name}** · ${parts.join(' · ')}`;
 }
 
+const HOP_SHORT = { 'camera-server': 'Cam', 'server-studio': 'Studio' };
+
+function hopText(hop) {
+  if (!hop) return '—';
+  if (hop.status === 'offline') return '🔴';
+  if (hop.status === 'warning') return `🟡 ${hop.bitrateMbps !== null ? `${hop.bitrateMbps.toFixed(2)} Mbps` : 'low'}`;
+  return '🟢';
+}
+
+/**
+ * The MediaMTX panel (its own channel): the media-mtx site's streams, live
+ * or not, and each hop's status (🟢 ok, 🟡 low bitrate, 🔴 offline).
+ */
+export function buildMediamtxMessage(mtx) {
+  const live = mtx.paths.filter((p) => p.live).length;
+  const lines = [
+    `## 🟢 ${live} live stream${live === 1 ? '' : 's'}`,
+    `-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+  ];
+  for (const p of mtx.paths) {
+    const hops = Object.entries(p.hops)
+      .map(([hop, status]) => `${HOP_SHORT[hop] ?? hop} ${hopText(status)}`)
+      .join(' · ');
+    lines.push(`${p.live ? '🟢' : '⚫'} **${p.path}** · ${hops}`);
+  }
+  if (mtx.paths.length === 0) lines.push('-# No streams right now.');
+  if (mtx.error) lines.push(`⚠️ ${mtx.error.slice(0, 300)}`);
+
+  let description = lines.join('\n');
+  if (description.length > 4000) description = `${description.slice(0, 3990)}\n…`;
+  const embed = new EmbedBuilder()
+    .setTitle('MediaMTX')
+    .setDescription(description)
+    .setColor(mtx.error ? 0xfee75c : live ? 0x57f287 : 0x4f545c);
+  return { content: '', embeds: [embed], components: [] };
+}
+
 export function buildSummaryMessage(snapshots, error) {
   const count = (state) => snapshots.filter((s) => s.state === state).length;
   const live = count('live');
@@ -60,7 +100,34 @@ export function buildSummaryMessage(snapshots, error) {
   return { content: '', embeds: [embed], components: [] };
 }
 
-export function buildUnitMessage(snap) {
+/**
+ * "Set destination → MediaMTX stream" dropdown: the site's live streams
+ * first, then other streams it has seen recently, then "Other…" to type a
+ * name. The unit's current destination shows as selected. Only offered
+ * when the site login (which gives the SRT address) is configured.
+ */
+function buildMtxSelectRow(snap, mtx) {
+  if (!mtx?.srtAddress) return null;
+  const names = [...mtx.paths.filter((p) => p.live), ...mtx.paths.filter((p) => !p.live)].map((p) => p.path);
+  const options = names.slice(0, 24).map((path) => ({
+    label: path.slice(0, 100),
+    value: path.slice(0, 100),
+    emoji: mtx.streams.includes(path) ? '🟢' : '⚫',
+    default: snap.destination === path,
+  }));
+  options.push({ label: 'Other… (type a stream name)', value: MTX_OTHER_VALUE, emoji: '✏️' });
+
+  const live = snap.state === 'live';
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`${MTX_SELECT_PREFIX}${snap.id}`)
+      .setPlaceholder(live ? 'Stop the stream to change its MediaMTX destination' : 'Set destination → MediaMTX stream...')
+      .setDisabled(live)
+      .addOptions(options),
+  );
+}
+
+export function buildUnitMessage(snap, mtx = null) {
   const style = STATE_STYLE[snap.state];
   const embed = new EmbedBuilder()
     .setTitle(`${style.icon} ${snap.name}`)
@@ -107,7 +174,8 @@ export function buildUnitMessage(snap) {
           .setDisabled(snap.state === 'offline'),
   );
 
-  return { content: '', embeds: [embed], components: [row] };
+  const mtxRow = snap.state === 'offline' ? null : buildMtxSelectRow(snap, mtx);
+  return { content: '', embeds: [embed], components: mtxRow ? [row, mtxRow] : [row] };
 }
 
 /** Comparable form of a rendered message, minus the summary's always-changing "updated" time. */

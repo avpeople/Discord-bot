@@ -62,4 +62,14 @@ export const config = {
     password: process.env.LIVEU_PASSWORD || null,
     roleId: process.env.LIVEU_ROLE_ID || process.env.ALLOWED_ROLE_ID,
   },
+  // Optional: the AVP media-mtx site (see src/mediamtx/). The login gives
+  // the stream list + SRT address (LiveU destination dropdown); the events
+  // API key gives stream online/offline/low-bitrate events.
+  mediamtx: {
+    url: process.env.MEDIAMTX_URL || null,
+    username: process.env.MEDIAMTX_USERNAME || null,
+    password: process.env.MEDIAMTX_PASSWORD || null,
+    eventsUrl: process.env.MEDIAMTX_EVENTS_URL || null,
+    eventsApiKey: process.env.MEDIAMTX_EVENTS_API_KEY || null,
+  },
 };

@@ -35,6 +35,12 @@ services:
       LIVEU_EMAIL: ${LIVEU_EMAIL}
       LIVEU_PASSWORD: ${LIVEU_PASSWORD}
       LIVEU_ROLE_ID: ${LIVEU_ROLE_ID}
+      # media-mtx site (optional) — see .env.example
+      MEDIAMTX_URL: ${MEDIAMTX_URL}
+      MEDIAMTX_USERNAME: ${MEDIAMTX_USERNAME}
+      MEDIAMTX_PASSWORD: ${MEDIAMTX_PASSWORD}
+      MEDIAMTX_EVENTS_API_KEY: ${MEDIAMTX_EVENTS_API_KEY}
+      MEDIAMTX_EVENTS_URL: ${MEDIAMTX_EVENTS_URL}
     volumes:
       - claude-config:/data/claude-config
       - workspaces:/data/workspaces

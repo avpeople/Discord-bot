@@ -1,14 +1,29 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionsBitField } from 'discord.js';
+import {
+  ActionRowBuilder,
+  AttachmentBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+  ModalBuilder,
+  PermissionsBitField,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
 import { config } from '../config.js';
 import * as liveu from './client.js';
 import { unitState } from './parse.js';
 import { getLiveuConfig, updateLiveuConfig } from './store.js';
 import { isMonitoring, latestSnapshots, pollNow, renderPanel } from './monitor.js';
-import { formatBitrate, GO_LIVE_PREFIX, STOP_PREFIX } from './view.js';
+import { formatBitrate, GO_LIVE_PREFIX, MTX_OTHER_VALUE, MTX_SELECT_PREFIX, STOP_PREFIX } from './view.js';
 import { logEvent } from '../log-channel.js';
+import * as mtx from '../mediamtx/client.js';
 
 const GO_LIVE_CONFIRM_PREFIX = 'liveu:go-live-confirm:';
 const STOP_CONFIRM_PREFIX = 'liveu:stop-confirm:';
+const MTX_MODAL_PREFIX = 'liveu:mtx-modal:';
+const MTX_PATH_INPUT_ID = 'path';
+// MediaMTX path names: letters, digits and a few separators.
+const MTX_PATH_PATTERN = /^[A-Za-z0-9._~\-/]+$/;
 
 export function isLiveuInteraction(customId) {
   return customId.startsWith('liveu:');
@@ -56,6 +71,31 @@ export async function handleSetLiveuChannel(interaction) {
   await pollNow();
   await renderPanel(interaction.guildId, latestSnapshots());
   await interaction.editReply(`✅ ${channel} now shows live LiveU status. Changes are logged to the studio log (\`/studio set-log-channel\`).`);
+}
+
+/** `/studio set-mediamtx-channel` — gives the MediaMTX stream panel its own channel. */
+export async function handleSetMediamtxChannel(interaction) {
+  if (!canManage(interaction)) return interaction.reply(ephemeral('You need the **Manage Channels** permission to do that.'));
+  if (!isMonitoring() || (!mtx.isConfigured() && !mtx.eventsConfigured())) {
+    return interaction.reply(
+      ephemeral("The media-mtx site isn't set up on the bot — set `MEDIAMTX_URL` + `MEDIAMTX_USERNAME` / `MEDIAMTX_PASSWORD` (and `MEDIAMTX_EVENTS_API_KEY` for stream status) and redeploy."),
+    );
+  }
+
+  const channel = interaction.options.getChannel('channel', true);
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  // Moving the panel: remove the old one so it doesn't sit there frozen.
+  const old = getLiveuConfig(interaction.guildId);
+  if (old?.mtxChannelId && old.mtxMessageId) {
+    const oldChannel = await interaction.client.channels.fetch(old.mtxChannelId).catch(() => null);
+    await oldChannel?.messages.delete(old.mtxMessageId).catch(() => {});
+  }
+
+  updateLiveuConfig(interaction.guildId, { mtxChannelId: channel.id, mtxMessageId: null });
+  await pollNow();
+  await renderPanel(interaction.guildId, latestSnapshots());
+  await interaction.editReply(`✅ ${channel} now shows the MediaMTX streams. Stream events go to the studio log.`);
 }
 
 /** `/studio liveu-alert-bitrate` — the studio-log low-bitrate threshold (0 turns the alert off). */
@@ -159,7 +199,62 @@ async function handleStopConfirm(interaction, bossId) {
   setTimeout(() => pollNow(), 3000);
 }
 
-/** Routes every `liveu:*` button. */
+/**
+ * Points a unit at a MediaMTX stream: an SRT destination publishing into
+ * `path` on the media-mtx site's SRT address, selected as the unit's
+ * destination — so the next Go Live streams there.
+ */
+async function applyMtxDestination(interaction, bossId, path) {
+  const name = unitName(bossId);
+  if (latestSnapshots().find((s) => s.id === bossId)?.state === 'live') {
+    return interaction.editReply(`**${name}** is live — stop the stream before changing its destination.`);
+  }
+  try {
+    const { srtAddress } = await mtx.getStreams();
+    if (!srtAddress) throw new Error("the media-mtx site didn't return an SRT address");
+    await liveu.setSrtDestination(bossId, { title: path, url: srtAddress, streamId: mtx.publishStreamId(path) });
+    await interaction.editReply(`✅ **${name}** now streams to MediaMTX **${path}** on Go Live.`);
+    await logEvent(interaction.guildId, `🎯 ${interaction.user} set **${name}**'s destination to MediaMTX **${path}**`, 'studio');
+  } catch (err) {
+    await interaction.editReply(`❌ Couldn't set the destination: ${err.message}`.slice(0, 2000));
+    return;
+  }
+  setTimeout(() => pollNow(), 2000);
+}
+
+async function handleMtxSelect(interaction, bossId) {
+  const path = interaction.values[0];
+  if (path === MTX_OTHER_VALUE) {
+    const modal = new ModalBuilder()
+      .setCustomId(`${MTX_MODAL_PREFIX}${bossId}`)
+      .setTitle(`MediaMTX stream for ${unitName(bossId)}`.slice(0, 45))
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId(MTX_PATH_INPUT_ID)
+            .setLabel('Stream name')
+            .setPlaceholder('e.g. LU300-1')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(100),
+        ),
+      );
+    return interaction.showModal(modal);
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  return applyMtxDestination(interaction, bossId, path);
+}
+
+async function handleMtxModal(interaction, bossId) {
+  const path = interaction.fields.getTextInputValue(MTX_PATH_INPUT_ID).trim();
+  if (!MTX_PATH_PATTERN.test(path)) {
+    return interaction.reply(ephemeral('Stream names can only use letters, numbers and `. _ ~ - /`.'));
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  return applyMtxDestination(interaction, bossId, path);
+}
+
+/** Routes every `liveu:*` button, select menu and modal. */
 export async function handleLiveuInteraction(interaction) {
   if (!canOperate(interaction)) return interaction.reply(ephemeral("You don't have permission to control the LiveUs."));
   const id = interaction.customId;
@@ -167,4 +262,6 @@ export async function handleLiveuInteraction(interaction) {
   if (id.startsWith(GO_LIVE_PREFIX)) return handleGoLiveButton(interaction, id.slice(GO_LIVE_PREFIX.length));
   if (id.startsWith(STOP_CONFIRM_PREFIX)) return handleStopConfirm(interaction, id.slice(STOP_CONFIRM_PREFIX.length));
   if (id.startsWith(STOP_PREFIX)) return handleStopButton(interaction, id.slice(STOP_PREFIX.length));
+  if (id.startsWith(MTX_SELECT_PREFIX)) return handleMtxSelect(interaction, id.slice(MTX_SELECT_PREFIX.length));
+  if (id.startsWith(MTX_MODAL_PREFIX)) return handleMtxModal(interaction, id.slice(MTX_MODAL_PREFIX.length));
 }

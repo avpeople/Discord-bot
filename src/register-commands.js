@@ -186,6 +186,18 @@ const commands = [
     )
     .addSubcommand((sub) =>
       sub
+        .setName('set-mediamtx-channel')
+        .setDescription('Give the MediaMTX stream panel its own channel (posts it there now)')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The channel for the MediaMTX panel')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('liveu-alert-bitrate')
         .setDescription('Log to the studio log when a live LiveU drops under this bitrate')
         .addIntegerOption((opt) =>
