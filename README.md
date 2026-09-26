@@ -121,6 +121,15 @@ there's just a dropdown waiting, no need to run `/code new` each time.
 - Only one picker channel per server. Running the command again in a
   different channel moves it there; the old channel keeps whatever its
   last message was (nothing un-sets it automatically).
+- The picker (both this one and `/code new`'s) shows the Claude account's
+  usage above the dropdown: a 5-hour session bar and a weekly bar with
+  their reset times, like Claude Code's `/usage`. The picker channel's
+  message refreshes every 3 minutes
+  ([src/claude-usage.js](src/claude-usage.js)). It reads the `claude login`
+  credentials and an undocumented Claude Code endpoint, so it's hidden
+  with an API key login and may break if Anthropic changes that endpoint.
+  The bot never refreshes the login token itself, so while no session has
+  run for a few hours the last known numbers are shown, marked as such.
 
 ## Deploy updates from Coolify (optional)
 

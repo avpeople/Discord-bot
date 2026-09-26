@@ -5,6 +5,12 @@ import { hasAccess, createSessionForRepo } from './handlers.js';
 import { buildOpenSessionRow } from './reply.js';
 
 const CONFIRMATION_VISIBLE_MS = 10_000;
+// How often the picker message is re-rendered to update the usage bars.
+const USAGE_REFRESH_MS = 3 * 60 * 1000;
+
+// Picker messages currently showing a "session started" confirmation — the
+// usage refresh leaves these alone so it doesn't cut the confirmation short.
+const confirmingMessageIds = new Set();
 
 /** Only members who can manage channels may designate the picker channel — this is server config, not a per-session action. */
 function canManage(member) {
@@ -72,12 +78,14 @@ export async function handlePersistentRepoSelected(interaction, sessionManager) 
     return;
   }
 
+  confirmingMessageIds.add(pickerMessage.id);
   await pickerMessage.edit({
     content: `✅ ${interaction.user} started a session for **${fullName}**: ${sessionChannel}`,
     components: [buildOpenSessionRow(interaction.guildId, sessionChannel.id)],
   });
 
   setTimeout(() => {
+    confirmingMessageIds.delete(pickerMessage.id);
     resetToPicker(pickerMessage).catch((err) => console.error('Failed to reset picker channel message:', err));
   }, CONFIRMATION_VISIBLE_MS);
 }
@@ -103,4 +111,28 @@ export async function resyncPickerChannel(client, guildId) {
   if (!message) return;
 
   await resetToPicker(message).catch((err) => console.error('Failed to resync picker channel on boot:', err));
+}
+
+/**
+ * Re-renders each guild's picker message every few minutes so its Claude
+ * usage bars stay current. Skips the edit when nothing changed (reset times
+ * are Discord timestamps, so they count down without edits).
+ */
+export function startPickerUsageRefresh(client) {
+  setInterval(async () => {
+    for (const guild of client.guilds.cache.values()) {
+      const entry = getPickerChannel(guild.id);
+      if (!entry || confirmingMessageIds.has(entry.messageId)) continue;
+      try {
+        const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+        const message = await channel?.messages.fetch(entry.messageId).catch(() => null);
+        if (!message) continue;
+        const reply = await buildRepoPickerReply(PERSISTENT_REPO_SELECT_ID);
+        if (reply.content === message.content || confirmingMessageIds.has(message.id)) continue;
+        await message.edit(reply);
+      } catch (err) {
+        console.error('Failed to refresh picker usage:', err);
+      }
+    }
+  }, USAGE_REFRESH_MS);
 }

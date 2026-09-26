@@ -67,6 +67,7 @@ import {
   handleSetPickerChannel,
   handlePersistentRepoSelected,
   resyncPickerChannel,
+  startPickerUsageRefresh,
 } from './sessions/picker-channel-handlers.js';
 import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
 import { handleSetLogChannel, handleSetStudioLogChannel, handleSetCoolifyLogChannel } from './log-channel-handlers.js';
@@ -145,6 +146,7 @@ client.once('ready', async () => {
   for (const guild of client.guilds.cache.values()) {
     await resyncPickerChannel(client, guild.id);
   }
+  startPickerUsageRefresh(client);
 });
 
 client.on('interactionCreate', async (interaction) => {
