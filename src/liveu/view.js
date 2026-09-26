@@ -62,47 +62,45 @@ const TABLE_MAX_CHARS = 3600; // leaves room for the header lines in the 4096-ch
 
 /**
  * The MediaMTX panel (its own channel): one row per stream in a monospace
- * table so the columns line up — a status dot, the name, IN (a feed
- * publishing to it), OUT (the studio pulling it), and a note when the
- * bitrate is low. Only the leading dot is an emoji, so the text columns
- * stay aligned.
+ * table so the columns line up — a status dot, the name, IN (something
+ * publishing to it), OUT (something pulling it), and the bitrate. Only the
+ * leading dot is an emoji, so the text columns stay aligned.
  *
  * Dot: 🟢 both in and out, 🟡 one of them, ⚫ neither. Rows are sorted the
  * same way (🟢 first).
  *
- * IN comes from the site's live list, the current truth for "is something
- * publishing". OUT comes from the latest server → studio event. Camera-hop
- * events aren't used for IN: an old camera "offline" event on a stream that's
- * live now is stale.
+ * With MediaMTX's own API configured, IN/OUT cover every publisher and
+ * reader (OUT shows how many), and bitrate is measured for every stream.
+ * Without it they come from the site's camera → server / server → studio
+ * events (so OUT only knows about the studio), and bitrate is only known
+ * when the site flags it as low. See mediamtx/state.js.
  */
 export function buildMediamtxMessage(mtx) {
   const pad = (text, width) => (text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width));
+  const mbps = (kbps) => `${(kbps / 1000).toFixed(1)} Mbps`;
 
   const streams = mtx.paths.map((p) => {
-    const studio = p.hops['server-studio']?.status;
-    const out = studio === 'online' || studio === 'warning';
     // Low-bitrate warnings only mean something while a feed is actually coming in.
-    const warnings = p.live ? Object.entries(p.hops).filter(([, h]) => h?.status === 'warning') : [];
-    return { ...p, in: p.live, out, warnings, activity: Number(p.live) + Number(out) };
+    const warnings = p.in ? Object.entries(p.hops).filter(([, h]) => h?.status === 'warning') : [];
+    return { ...p, warnings, activity: Number(Boolean(p.in)) + Number(Boolean(p.out)) };
   });
   streams.sort((a, b) => b.activity - a.activity);
   const nameWidth = Math.min(NAME_WIDTH_MAX, Math.max(6, ...streams.map((s) => s.path.length)));
 
-  const studioCount = streams.filter((s) => s.out).length;
+  const inCount = streams.filter((s) => s.in).length;
+  const outCount = streams.filter((s) => s.out).length;
   const lowCount = streams.filter((s) => s.warnings.length).length;
   const rows = streams.map((s) => {
     const dot = s.activity === 2 ? '🟢' : s.activity === 1 ? '🟡' : '⚫';
-    const note = s.warnings.length
-      ? s.warnings
-          .map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`)
-          .join(', ')
-      : s.activity === 0
-        ? 'offline'
-        : '';
-    return `${dot} ${pad(s.path, nameWidth)}  ${pad(s.in ? '▶ in' : '—', 6)}${pad(s.out ? '▶ studio' : '—', 10)}${note}`.trimEnd();
+    const inText = s.in === null ? '?' : s.in ? '▶ in' : '—';
+    const outText = s.out === null ? '?' : !s.out ? '—' : s.readers !== null ? `▶ ${s.readers}` : '▶ studio';
+    let rate = s.in && s.inKbps !== null ? mbps(s.inKbps) : '—';
+    const low = s.warnings.map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`);
+    if (low.length) rate = rate === '—' ? low.join(', ') : `${rate}  ${low.join(', ')}`;
+    return `${dot} ${pad(s.path, nameWidth)}  ${pad(inText, 6)}${pad(outText, 10)}${rate}`.trimEnd();
   });
 
-  let table = `   ${pad('STREAM', nameWidth)}  ${pad('IN', 6)}OUT`;
+  let table = `   ${pad('STREAM', nameWidth)}  ${pad('IN', 6)}${pad('OUT', 10)}BITRATE`;
   for (let i = 0; i < rows.length; i++) {
     if (table.length + rows[i].length + 20 > TABLE_MAX_CHARS) {
       table += `\n   +${rows.length - i} more`;
@@ -111,9 +109,8 @@ export function buildMediamtxMessage(mtx) {
     table += `\n${rows[i]}`;
   }
 
-  const live = mtx.paths.filter((p) => p.live).length;
   const lines = [
-    `## ${live} live${studioCount ? ` · ${studioCount} to studio` : ''}${lowCount ? ` · ${lowCount} low` : ''}`,
+    `## ${inCount} in · ${outCount} out${lowCount ? ` · ${lowCount} low` : ''}`,
     `-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`,
   ];
   if (mtx.error) lines.push(`⚠️ ${mtx.error.slice(0, 300)}`);
@@ -122,7 +119,7 @@ export function buildMediamtxMessage(mtx) {
   const embed = new EmbedBuilder()
     .setTitle('MediaMTX')
     .setDescription(lines.join('\n'))
-    .setColor(mtx.error || lowCount ? 0xfee75c : live ? 0x57f287 : 0x4f545c);
+    .setColor(mtx.error || lowCount ? 0xfee75c : inCount ? 0x57f287 : 0x4f545c);
   return { content: '', embeds: [embed], components: [] };
 }
 
@@ -146,19 +143,20 @@ export function buildSummaryMessage(snapshots, error) {
 }
 
 /**
- * "Set destination → MediaMTX stream" dropdown: the site's live streams
- * first, then other streams it has seen recently, then "Other…" to type a
+ * "Set destination → MediaMTX stream" dropdown: streams with a feed coming
+ * in first, then the rest of the site's streams, then "Other…" to type a
  * name. The unit's current destination shows as selected. Only offered
  * when the site login (which gives the SRT address) is configured.
  */
 function buildMtxSelectRow(snap, mtx) {
   if (!mtx?.srtAddress) return null;
-  const names = [...mtx.paths.filter((p) => p.live), ...mtx.paths.filter((p) => !p.live)].map((p) => p.path);
-  const options = names.slice(0, 24).map((path) => ({
-    label: path.slice(0, 100),
-    value: path.slice(0, 100),
-    emoji: mtx.streams.includes(path) ? '🟢' : '⚫',
-    default: snap.destination === path,
+  // Streams with a feed coming in first; the emoji shows which (a LiveU usually publishes to one that isn't yet).
+  const ordered = [...mtx.paths.filter((p) => p.in), ...mtx.paths.filter((p) => !p.in)];
+  const options = ordered.slice(0, 24).map((p) => ({
+    label: p.path.slice(0, 100),
+    value: p.path.slice(0, 100),
+    emoji: p.in ? '🟢' : '⚫',
+    default: snap.destination === p.path,
   }));
   options.push({ label: 'Other… (type a stream name)', value: MTX_OTHER_VALUE, emoji: '✏️' });
 

@@ -1,9 +1,15 @@
 import * as mtx from './client.js';
 
 /**
- * Tracks the media-mtx site between polls: the live stream list + SRT
- * address (for the LiveU destination dropdown), and each stream's latest
- * status per hop from the events feed (for the board and the studio log).
+ * Tracks MediaMTX between polls, for the MediaMTX panel, the LiveU
+ * destination dropdown and the studio log:
+ *
+ *  - the site's stream list (every configured stream, live or not) + SRT address;
+ *  - the site's events feed: each stream's latest camera → server (IN) and
+ *    server → studio (OUT) status, and low-bitrate warnings;
+ *  - optionally MediaMTX's own API, which is used for IN/OUT when set (it
+ *    sees every publisher and every reader, not just the studio) and gives
+ *    bitrate from the bytes counted between polls.
  *
  * The events API returns a rolling window, so events are de-duplicated by
  * timestamp + path + hop. The first poll only records what's there, so a
@@ -21,6 +27,10 @@ let firstEventsPoll = true;
 // `${path}::${hop}` -> { connectivity: event, warning: event }
 const latest = new Map();
 let current = { configured: false, streams: [], srtAddress: null, paths: [], error: null };
+// From MediaMTX's own API: path -> { ready, readers, inKbps, outKbps }; null when not configured or it failed.
+let api = null;
+// path -> { rx, tx, at } byte counters from the previous API poll, for bitrate.
+let lastBytes = new Map();
 
 const eventKey = (ev) => `${ev.timestamp}::${ev.path}::${ev.hop}`;
 
@@ -48,8 +58,44 @@ function hopStatus(path, hop) {
   return { status: 'online', at: Math.max(entry.connectivity.timestamp, w?.timestamp ?? 0) };
 }
 
+/** Kbps from two byte counters `ms` apart; null on the first sample or a counter reset. */
+function kbps(bytes, prevBytes, ms) {
+  if (typeof bytes !== 'number' || typeof prevBytes !== 'number' || ms <= 0 || bytes < prevBytes) return null;
+  return ((bytes - prevBytes) * 8) / ms; // bits per ms = kbps
+}
+
+async function pollApi() {
+  const now = Date.now();
+  const items = await mtx.getApiPaths();
+  const next = new Map();
+  const bytes = new Map();
+  for (const item of items) {
+    if (!item?.name) continue;
+    const prev = lastBytes.get(item.name);
+    bytes.set(item.name, { rx: item.bytesReceived, tx: item.bytesSent, at: now });
+    next.set(item.name, {
+      ready: Boolean(item.ready),
+      readers: Array.isArray(item.readers) ? item.readers.length : 0,
+      inKbps: prev ? kbps(item.bytesReceived, prev.rx, now - prev.at) : null,
+      outKbps: prev ? kbps(item.bytesSent, prev.tx, now - prev.at) : null,
+    });
+  }
+  lastBytes = bytes;
+  api = next;
+}
+
+const isUp = (hop) => hop?.status === 'online' || hop?.status === 'warning';
+
+/**
+ * One entry per stream: `in` (something publishing), `out` (something
+ * pulling), `readers` (count, API only), `inKbps` / `outKbps` (API only),
+ * and the per-hop event status (for low-bitrate notes). IN/OUT come from
+ * MediaMTX's API when it's configured, else from the site's events; null
+ * means unknown (neither source says).
+ */
 function buildPaths(streams) {
   const names = new Set(streams);
+  if (api) for (const name of api.keys()) names.add(name);
   const now = Date.now();
   for (const [key, entry] of latest) {
     const recent = Math.max(entry.connectivity?.timestamp ?? 0, entry.warning?.timestamp ?? 0);
@@ -57,11 +103,21 @@ function buildPaths(streams) {
   }
   return [...names]
     .sort((a, b) => a.localeCompare(b))
-    .map((path) => ({
-      path,
-      live: streams.includes(path),
-      hops: Object.fromEntries(HOPS.map((hop) => [hop, hopStatus(path, hop)])),
-    }));
+    .map((path) => {
+      const hops = Object.fromEntries(HOPS.map((hop) => [hop, hopStatus(path, hop)]));
+      const a = api?.get(path);
+      // No event for a hop means it's never connected; null only when there's no events feed to ask.
+      const fromEvents = (hop) => (mtx.eventsConfigured() ? isUp(hops[hop]) : null);
+      return {
+        path,
+        in: a ? a.ready : api ? false : fromEvents('camera-server'),
+        out: a ? a.readers > 0 : api ? false : fromEvents('server-studio'),
+        readers: a ? a.readers : null,
+        inKbps: a?.inKbps ?? null,
+        outKbps: a?.outKbps ?? null,
+        hops,
+      };
+    });
 }
 
 /**
@@ -70,7 +126,7 @@ function buildPaths(streams) {
  * is kept on the state and shown on the board.
  */
 export async function pollMediamtx() {
-  if (!mtx.isConfigured() && !mtx.eventsConfigured()) {
+  if (!mtx.isConfigured() && !mtx.eventsConfigured() && !mtx.apiConfigured()) {
     current = { configured: false, streams: [], srtAddress: null, paths: [], error: null };
     return [];
   }
@@ -81,6 +137,15 @@ export async function pollMediamtx() {
     try {
       ({ streams, srtAddress } = await mtx.getStreams());
     } catch (err) {
+      errors.push(err.message);
+    }
+  }
+
+  if (mtx.apiConfigured()) {
+    try {
+      await pollApi();
+    } catch (err) {
+      api = null; // fall back to the site's events for IN/OUT
       errors.push(err.message);
     }
   }

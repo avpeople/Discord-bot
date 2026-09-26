@@ -71,5 +71,9 @@ export const config = {
     password: process.env.MEDIAMTX_PASSWORD || null,
     eventsUrl: process.env.MEDIAMTX_EVENTS_URL || null,
     eventsApiKey: process.env.MEDIAMTX_EVENTS_API_KEY || null,
+    // MediaMTX's own API (e.g. http://host:9997) — every reader and bytes in/out, for real IN/OUT and bitrate.
+    apiUrl: process.env.MEDIAMTX_API_URL || null,
+    apiUser: process.env.MEDIAMTX_API_USER || null,
+    apiPassword: process.env.MEDIAMTX_API_PASSWORD || null,
   },
 };

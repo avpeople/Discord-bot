@@ -82,6 +82,31 @@ export async function getEvents(limit = 500) {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
+/** Whether MediaMTX's own API (not the site) is configured — it gives real IN/OUT for every connection, and bytes for bitrate. */
+export function apiConfigured() {
+  return Boolean(config.mediamtx.apiUrl);
+}
+
+/**
+ * Every path from MediaMTX's own API (GET /v3/paths/list):
+ * [{ name, ready, readers: [{ type, id }], bytesReceived, bytesSent }].
+ * `ready` means something is publishing; `readers` is everyone pulling it
+ * (the studio, a laptop, a decoder...). Basic auth if MEDIAMTX_API_USER is set.
+ */
+export async function getApiPaths() {
+  const headers = {};
+  if (config.mediamtx.apiUser) {
+    headers.Authorization = `Basic ${Buffer.from(`${config.mediamtx.apiUser}:${config.mediamtx.apiPassword ?? ''}`).toString('base64')}`;
+  }
+  const response = await fetch(`${config.mediamtx.apiUrl.replace(/\/+$/, '')}/v3/paths/list?itemsPerPage=1000`, {
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`MediaMTX API /v3/paths/list failed: ${response.status} ${response.statusText}`);
+  const data = await response.json();
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
 /** The SRT streamid a LiveU publishes into `path` with (what the Studio Patch app sets). */
 export function publishStreamId(path) {
   return `publish:${path}`;

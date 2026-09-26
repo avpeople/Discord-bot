@@ -259,7 +259,16 @@ same endpoints as the Rugby GFX site and Studio Patch):
   pick adds a destination to the LiveU account, like Studio Patch does.
 - `MEDIAMTX_EVENTS_API_KEY` (created on the site's Events page) — stream
   online/offline and low-bitrate/recovered events go to the studio log,
-  and the panel's per-hop Cam / Studio status comes from these.
+  and the panel's IN (camera → server) and OUT (server → studio) come
+  from these.
+- `MEDIAMTX_API_URL` (+ `MEDIAMTX_API_USER` / `MEDIAMTX_API_PASSWORD`) —
+  optional, MediaMTX's own API (e.g. `http://host:9997`). When set, IN/OUT
+  come from it instead and cover every connection (OUT shows how many are
+  pulling — a laptop counts, not just the studio), and every stream gets a
+  measured bitrate. MediaMTX needs `api: yes` and an `apiAddress` the bot
+  can reach.
+
+Panel dots: 🟢 in and out, 🟡 one of them, ⚫ neither.
 
 ## Welcome panel (role requests)
 

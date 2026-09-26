@@ -76,7 +76,7 @@ export async function handleSetLiveuChannel(interaction) {
 /** `/studio set-mediamtx-channel` — gives the MediaMTX stream panel its own channel. */
 export async function handleSetMediamtxChannel(interaction) {
   if (!canManage(interaction)) return interaction.reply(ephemeral('You need the **Manage Channels** permission to do that.'));
-  if (!isMonitoring() || (!mtx.isConfigured() && !mtx.eventsConfigured())) {
+  if (!isMonitoring() || (!mtx.isConfigured() && !mtx.eventsConfigured() && !mtx.apiConfigured())) {
     return interaction.reply(
       ephemeral("The media-mtx site isn't set up on the bot — set `MEDIAMTX_URL` + `MEDIAMTX_USERNAME` / `MEDIAMTX_PASSWORD` (and `MEDIAMTX_EVENTS_API_KEY` for stream status) and redeploy."),
     );

@@ -41,6 +41,9 @@ services:
       MEDIAMTX_PASSWORD: ${MEDIAMTX_PASSWORD}
       MEDIAMTX_EVENTS_API_KEY: ${MEDIAMTX_EVENTS_API_KEY}
       MEDIAMTX_EVENTS_URL: ${MEDIAMTX_EVENTS_URL}
+      MEDIAMTX_API_URL: ${MEDIAMTX_API_URL}
+      MEDIAMTX_API_USER: ${MEDIAMTX_API_USER}
+      MEDIAMTX_API_PASSWORD: ${MEDIAMTX_API_PASSWORD}
     volumes:
       - claude-config:/data/claude-config
       - workspaces:/data/workspaces

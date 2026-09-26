@@ -325,7 +325,7 @@ export function pollNow() {
 export function startLiveuMonitor(discordClient) {
   if (started) return;
   client = discordClient;
-  if (!liveu.isConfigured() && !mtxClient.isConfigured() && !mtxClient.eventsConfigured()) {
+  if (!liveu.isConfigured() && !mtxClient.isConfigured() && !mtxClient.eventsConfigured() && !mtxClient.apiConfigured()) {
     console.log('Neither LiveU nor the media-mtx site is configured — studio board monitoring disabled.');
     return;
   }
