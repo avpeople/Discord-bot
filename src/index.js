@@ -74,6 +74,7 @@ import { handleSetLogChannel, handleSetStudioLogChannel, handleSetCoolifyLogChan
 import { startCoolifyMonitor } from './coolify-monitor.js';
 import { initLogChannel } from './log-channel.js';
 import { startNotifyServer } from './notify-server.js';
+import { initUsageBarEmojis } from './usage-bar-emojis.js';
 import { registerCommands } from './register-commands.js';
 import { handleCoolifyControl } from './coolify-controls.js';
 
@@ -139,6 +140,9 @@ client.once('ready', async () => {
         .catch((err) => console.error('Failed to post restore notice:', err));
     }
   }
+
+  // Before the picker resync below, so the picker shows the smooth usage bars.
+  await initUsageBarEmojis(client);
 
   // Reset any picker channel back to the plain picker in case the bot
   // restarted mid-confirmation-window (e.g. right after someone picked a

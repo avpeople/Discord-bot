@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { usageBar } from './usage-bar-emojis.js';
 
 /**
  * The Claude account's plan usage — the same 5-hour session and weekly
@@ -77,17 +78,23 @@ export async function getClaudeUsage() {
 
 const BAR_WIDTH = 10;
 
-function fillEmoji(percent) {
-  if (percent >= 90) return '🟥';
-  if (percent >= 70) return '🟨';
-  return '🟩';
+function barColor(percent) {
+  if (percent >= 90) return 'red';
+  if (percent >= 70) return 'yellow';
+  return 'green';
 }
 
-// Emoji squares rather than █/░ so the bar looks the same on desktop and mobile.
+const SQUARES = { green: '🟩', yellow: '🟨', red: '🟥' };
+
+// The smooth custom-emoji bar when it's set up (see usage-bar-emojis.js),
+// otherwise standard emoji squares.
 function bar(percent) {
   const clamped = Math.min(Math.max(percent, 0), 100);
+  const color = barColor(clamped);
+  const custom = usageBar(clamped, color);
+  if (custom) return custom;
   const filled = Math.round((clamped / 100) * BAR_WIDTH);
-  return fillEmoji(clamped).repeat(filled) + '⬛'.repeat(BAR_WIDTH - filled);
+  return SQUARES[color].repeat(filled) + '⬛'.repeat(BAR_WIDTH - filled);
 }
 
 function formatWindow(label, w, resetStyle) {
