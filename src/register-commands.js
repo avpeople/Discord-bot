@@ -136,6 +136,18 @@ const commands = [
           opt.setName('coms').setDescription('The coms channel').setRequired(true).setAutocomplete(true),
         ),
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-coms-channel')
+        .setDescription('Post the coms landing page: pick a coms channel to open a voice chat for it')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('Text channel for the landing page (voice chats open in its category)')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
     .addSubcommand((sub) => sub.setName('leave').setDescription('Stop the coms bridge'))
     .addSubcommand((sub) => sub.setName('status').setDescription("Show what the coms bridge is doing"))
     .toJSON(),

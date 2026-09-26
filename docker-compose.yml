@@ -27,6 +27,7 @@ services:
       # passes through env vars referenced here.
       COMS_API_URL: ${COMS_API_URL}
       COMS_BRIDGE_KEY: ${COMS_BRIDGE_KEY}
+      COMS_ROLE_ID: ${COMS_ROLE_ID}
       # Inbound notify endpoint (optional) — see .env.example
       NOTIFY_API_KEY: ${NOTIFY_API_KEY}
       NOTIFY_PORT: ${NOTIFY_PORT:-8790}

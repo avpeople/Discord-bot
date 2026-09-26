@@ -47,7 +47,10 @@ export const config = {
   coms: {
     apiUrl: process.env.COMS_API_URL || null,
     bridgeKey: process.env.COMS_BRIDGE_KEY || null,
+    // Who can open/end a bridge from the coms landing panel (besides channel managers).
+    roleId: process.env.COMS_ROLE_ID || process.env.ALLOWED_ROLE_ID,
   },
+  comsStatePath: process.env.COMS_STATE_PATH || '/data/claude-config/discord-coms.json',
   // Optional: inbound HTTP endpoint external services (e.g. the Sports
   // GFX site) call to post a studio-monitoring log line. Disabled
   // entirely if NOTIFY_API_KEY is unset — no port is opened.

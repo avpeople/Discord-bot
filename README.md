@@ -392,9 +392,18 @@ and the coms channel's LiveKit room, and mixes audio both ways.
   "Discord") and copy its key. Set `COMS_API_URL` (the coms API, e.g.
   `https://api-com.avp.nz`) and `COMS_BRIDGE_KEY`. The bot then shows as
   an online bridge in the admin console.
-- `/voice join channel:#voice coms:<channel>` (Manage Channels) — the coms
-  channel is picked from a list. Posts a control panel in the voice
-  channel's chat: who's on coms, and **Talk** / **Leave** buttons.
+- `/voice set-coms-channel channel:#coms` (Manage Channels) — posts the
+  **coms landing page** there: a dropdown of coms channels. Picking one
+  creates a voice chat **🎧 <coms channel>** in the landing channel's
+  category (e.g. Studio) and bridges it; the voice chat is deleted when
+  the bridge ends. The landing page shows what's open, with **End bridge**.
+  Opening/ending needs Manage Channels or `COMS_ROLE_ID` (default
+  `ALLOWED_ROLE_ID`). Picking another channel while one is open asks to
+  confirm the switch (it disconnects everyone in the current voice chat).
+- `/voice join channel:#voice coms:<channel>` (Manage Channels) — bridge an
+  existing voice channel instead (never deleted afterwards).
+- Either way a control panel goes in the voice chat's text: who's on coms,
+  and **Talk** / **Leave** buttons.
 - **Listen** is always on: everyone in the voice channel hears coms.
   **Talk** sends the voice channel's speakers out on coms while it's on —
   off by default so Discord chatter can't leak onto coms. Only people in

@@ -67,7 +67,8 @@ import {
   handleVoiceLeave,
   handleVoiceStatus,
   handleVoiceAutocomplete,
-  handleComsButton,
+  handleComsInteraction,
+  handleSetComsChannel,
   isComsInteraction,
   initComs,
 } from './coms/handlers.js';
@@ -146,7 +147,7 @@ client.once('ready', async () => {
   startCoolifyMonitor(client);
   startNotifyServer();
   startLiveuMonitor(client);
-  initComs();
+  initComs(client).catch((err) => console.error('[coms] init failed:', err));
 
   const restored = sessionManager.restore();
   if (restored.length > 0) {
@@ -210,6 +211,7 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'join') return handleVoiceJoin(interaction);
       if (sub === 'leave') return handleVoiceLeave(interaction);
       if (sub === 'status') return handleVoiceStatus(interaction);
+      if (sub === 'set-coms-channel') return handleSetComsChannel(interaction);
       return;
     }
 
@@ -279,9 +281,9 @@ client.on('interactionCreate', async (interaction) => {
       return handleFreshStartButton(interaction, sessionManager);
     }
 
-    // Coms bridge panel: Talk / Leave.
-    if (interaction.isButton() && isComsInteraction(interaction.customId)) {
-      return handleComsButton(interaction);
+    // Coms: landing panel dropdown / switch / End, and the voice chat panel's Talk / Leave.
+    if ((interaction.isButton() || interaction.isStringSelectMenu()) && isComsInteraction(interaction.customId)) {
+      return handleComsInteraction(interaction);
     }
 
     // LiveU status board: Go Live / Stop (each with a confirm), the MediaMTX destination dropdown and its "Other…" modal.
