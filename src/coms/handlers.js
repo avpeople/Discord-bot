@@ -5,6 +5,7 @@ import {
   ChannelType,
   ContainerBuilder,
   MessageFlags,
+  OverwriteType,
   PermissionsBitField,
   SeparatorBuilder,
   SeparatorSpacingSize,
@@ -300,6 +301,36 @@ async function startBridge({ guild, voiceChannel, comsChannel, user, createdChan
   return entry;
 }
 
+const { Flags } = PermissionsBitField;
+// The bot has to get in, talk, and post its Talk / Leave panel in the voice chat's text.
+const BOT_ALLOW = [Flags.ViewChannel, Flags.Connect, Flags.Speak, Flags.SendMessages, Flags.EmbedLinks, Flags.ReadMessageHistory];
+// The coms role has to see and join it, and talk to each other in it.
+const ROLE_ALLOW = [Flags.ViewChannel, Flags.Connect, Flags.Speak];
+
+/**
+ * Permissions for a created voice chat: the category's own overwrites (so it
+ * stays as private as, say, Studio is), plus explicit access for the bot and
+ * the coms role — a private category would otherwise lock both of them out.
+ */
+function voiceChatPermissions(guild, parent) {
+  const overwrites = new Map(); // id -> { id, type, allow: bitfield, deny: bitfield }
+  for (const o of parent?.permissionOverwrites?.cache?.values() ?? []) {
+    overwrites.set(o.id, { id: o.id, type: o.type, allow: new PermissionsBitField(o.allow), deny: new PermissionsBitField(o.deny) });
+  }
+  const grant = (id, type, perms) => {
+    if (!id) return;
+    const o = overwrites.get(id) ?? { id, type, allow: new PermissionsBitField(), deny: new PermissionsBitField() };
+    o.allow.add(perms);
+    o.deny.remove(perms);
+    overwrites.set(id, o);
+  };
+  const me = guild.members.me;
+  grant(me.id, OverwriteType.Member, BOT_ALLOW);
+  grant(me.roles?.botRole?.id, OverwriteType.Role, BOT_ALLOW);
+  if (guild.roles?.cache?.has(config.coms.roleId)) grant(config.coms.roleId, OverwriteType.Role, ROLE_ALLOW);
+  return [...overwrites.values()];
+}
+
 /** Landing panel: creates "🎧 <coms channel>" next to the landing channel and bridges it. */
 async function openFromLanding(interaction, comsChannelId) {
   const comsChannel = await findComsChannel(comsChannelId);
@@ -309,12 +340,25 @@ async function openFromLanding(interaction, comsChannelId) {
   if (!me.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
     throw new Error('I need the **Manage Channels** permission to create the voice chat.');
   }
-  const voiceChannel = await interaction.guild.channels.create({
-    name: `🎧 ${comsChannel.name}`.slice(0, 100),
-    type: ChannelType.GuildVoice,
-    parent: interaction.channel?.parentId ?? null, // same category as the landing panel (e.g. Studio)
-    reason: `Coms bridge to "${comsChannel.name}", opened by ${interaction.user.tag}`,
-  });
+  const parent = interaction.channel?.parent ?? null; // same category as the landing panel (e.g. Studio)
+  let voiceChannel;
+  try {
+    voiceChannel = await interaction.guild.channels.create({
+      name: `🎧 ${comsChannel.name}`.slice(0, 100),
+      type: ChannelType.GuildVoice,
+      parent: parent?.id ?? null,
+      permissionOverwrites: voiceChatPermissions(interaction.guild, parent),
+      reason: `Coms bridge to "${comsChannel.name}", opened by ${interaction.user.tag}`,
+    });
+  } catch (err) {
+    // Discord only lets a bot grant permissions it has itself (or Manage Roles lets it grant any).
+    if (err.code === 50013) {
+      throw new Error(
+        "Discord wouldn't let me set the voice chat's permissions. Give the bot's role **View Channel, Connect, Speak and Send Messages** (server-wide), or **Manage Roles**, then try again.",
+      );
+    }
+    throw err;
+  }
   try {
     await startBridge({ guild: interaction.guild, voiceChannel, comsChannel, user: interaction.user, createdChannel: true });
   } catch (err) {
