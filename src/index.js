@@ -77,6 +77,14 @@ import { startNotifyServer } from './notify-server.js';
 import { initUsageBarEmojis } from './usage-bar-emojis.js';
 import { registerCommands } from './register-commands.js';
 import { handleCoolifyControl } from './coolify-controls.js';
+import { startLiveuMonitor } from './liveu/monitor.js';
+import {
+  handleSetLiveuChannel,
+  handleLiveuAlertBitrate,
+  handleLiveuRaw,
+  handleLiveuInteraction,
+  isLiveuInteraction,
+} from './liveu/handlers.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -126,6 +134,7 @@ client.once('ready', async () => {
   initLogChannel(client);
   startCoolifyMonitor(client);
   startNotifyServer();
+  startLiveuMonitor(client);
 
   const restored = sessionManager.restore();
   if (restored.length > 0) {
@@ -190,6 +199,9 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'studio') {
       const sub = interaction.options.getSubcommand();
       if (sub === 'set-log-channel') return handleSetStudioLogChannel(interaction);
+      if (sub === 'set-liveu-channel') return handleSetLiveuChannel(interaction);
+      if (sub === 'liveu-alert-bitrate') return handleLiveuAlertBitrate(interaction);
+      if (sub === 'liveu-raw') return handleLiveuRaw(interaction);
       return;
     }
 
@@ -247,6 +259,11 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === FRESH_START_BUTTON_ID) {
       return handleFreshStartButton(interaction, sessionManager);
+    }
+
+    // LiveU status board: Go Live (preset picker) and Stop (with confirm).
+    if ((interaction.isButton() || interaction.isStringSelectMenu()) && isLiveuInteraction(interaction.customId)) {
+      return handleLiveuInteraction(interaction);
     }
 
     // Per-app controls opened from Server Status (dropdown, Logs, Restart/Redeploy/Stop/Start + confirms).

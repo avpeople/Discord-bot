@@ -217,6 +217,28 @@ storage/command plumbing on this side, just `/studio set-log-channel`
 (or a new command, if a source ever wants its own channel rather than
 sharing the `studio` one).
 
+### LiveU status board
+
+Set `LIVEU_EMAIL` / `LIVEU_PASSWORD` (the LiveU Solo portal login) and the
+bot polls LiveU every 15s ([src/liveu/](src/liveu/)):
+
+- `/studio set-liveu-channel channel:#liveu-status` — posts a summary at
+  the top (🔴 2 live · 🟢 1 online · ⚫ 5 offline), then one box per unit:
+  status, total bitrate, video input, SIMs up, and each connection's
+  bitrate/signal. Boxes are edited in place, only when something changed.
+- **Go Live** on a box picks a stream preset (picking one starts it);
+  **Stop** asks to confirm. Needs `LIVEU_ROLE_ID` (else `ALLOWED_ROLE_ID`).
+  Both presses are logged to the studio log.
+- The studio log (`/studio set-log-channel`) gets: unit online/offline,
+  went live/stopped, video input lost/back, SIM lost/connected, and
+  bitrate under the threshold for 2 polls in a row / recovered.
+  `/studio liveu-alert-bitrate kbps:1500` sets the threshold (0 = off).
+- `/studio liveu-raw unit:<name>` downloads the unit's raw API responses.
+  These LiveU endpoints are the Solo portal's private ones, not a
+  documented API, so field names are guessed in
+  [src/liveu/parse.js](src/liveu/parse.js) — if a stat shows `—` or looks
+  wrong, compare against the raw dump and add the real field name there.
+
 ## Welcome panel (role requests)
 
 Separate from the Claude Code sessions: `/welcome` manages a self-serve

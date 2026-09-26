@@ -32,6 +32,7 @@ export const config = {
   welcomeStatePath: process.env.WELCOME_STATE_PATH || '/data/claude-config/discord-welcome.json',
   pickerChannelStatePath: process.env.PICKER_CHANNEL_STATE_PATH || '/data/claude-config/discord-picker-channel.json',
   logChannelStatePath: process.env.LOG_CHANNEL_STATE_PATH || '/data/claude-config/discord-log-channel.json',
+  liveuStatePath: process.env.LIVEU_STATE_PATH || '/data/claude-config/discord-liveu.json',
   // Optional: Coolify API, used to post deploy progress into a session
   // channel after Commit merges (see src/coolify.js). Disabled if unset.
   // From inside a Coolify-deployed container, http://coolify:8080 usually
@@ -52,5 +53,13 @@ export const config = {
   notify: {
     port: Number(process.env.NOTIFY_PORT) || 8790,
     apiKey: process.env.NOTIFY_API_KEY || null,
+  },
+  // Optional: LiveU Solo account the studio LiveU board and alerts read
+  // from (see src/liveu/). Disabled entirely if unset. Go Live / Stop
+  // need LIVEU_ROLE_ID, falling back to ALLOWED_ROLE_ID.
+  liveu: {
+    email: process.env.LIVEU_EMAIL || null,
+    password: process.env.LIVEU_PASSWORD || null,
+    roleId: process.env.LIVEU_ROLE_ID || process.env.ALLOWED_ROLE_ID,
   },
 };

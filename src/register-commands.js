@@ -163,13 +163,46 @@ const commands = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName('studio')
-    .setDescription('Studio monitoring (GFX site logins, and future studio systems)')
+    .setDescription('Studio monitoring: LiveU status board, alerts and the studio log')
     .addSubcommand((sub) =>
       sub
         .setName('set-log-channel')
         .setDescription('Set where studio monitoring events (e.g. GFX site logins) get logged')
         .addChannelOption((opt) =>
           opt.setName('channel').setDescription('The channel to log studio events to').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-liveu-channel')
+        .setDescription('Make a channel the live LiveU status board (posts it there now)')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The channel for the LiveU status board')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('liveu-alert-bitrate')
+        .setDescription('Log to the studio log when a live LiveU drops under this bitrate')
+        .addIntegerOption((opt) =>
+          opt
+            .setName('kbps')
+            .setDescription('Threshold in kbps (default 1500). 0 turns the alert off.')
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(100000),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('liveu-raw')
+        .setDescription("Download a LiveU unit's raw API data (for fixing wrong-looking stats)")
+        .addStringOption((opt) =>
+          opt.setName('unit').setDescription('Unit name or serial').setRequired(true),
         ),
     )
     .toJSON(),

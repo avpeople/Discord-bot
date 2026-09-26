@@ -31,6 +31,10 @@ services:
       # Inbound notify endpoint (optional) — see .env.example
       NOTIFY_API_KEY: ${NOTIFY_API_KEY}
       NOTIFY_PORT: ${NOTIFY_PORT:-8790}
+      # LiveU status board + studio log alerts (optional) — see .env.example
+      LIVEU_EMAIL: ${LIVEU_EMAIL}
+      LIVEU_PASSWORD: ${LIVEU_PASSWORD}
+      LIVEU_ROLE_ID: ${LIVEU_ROLE_ID}
     volumes:
       - claude-config:/data/claude-config
       - workspaces:/data/workspaces
