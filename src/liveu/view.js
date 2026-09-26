@@ -57,22 +57,15 @@ function simLine(sim) {
 
 const HOP_SHORT = { 'camera-server': 'cam', 'server-studio': 'studio' };
 
-/** Stream names as compact inline-code tags, several to a line, capped to a field's 1024 chars. */
-function tagList(names) {
-  let out = '';
-  for (let i = 0; i < names.length; i++) {
-    const tag = `\`${names[i]}\``;
-    const more = ` +${names.length - i} more`;
-    if (out.length + tag.length + 1 + more.length > 1024) return `${out}${more}`;
-    out += (out ? ' ' : '') + tag;
-  }
-  return out;
-}
+const NAME_WIDTH_MAX = 18;
+const TABLE_MAX_CHARS = 3600; // leaves room for the header lines in the 4096-char description
 
 /**
- * The MediaMTX panel (its own channel), grouped rather than one row per
- * stream: going to the studio, low bitrate, live on the server, and
- * (as small text) recently seen but offline.
+ * The MediaMTX panel (its own channel): one row per stream in a monospace
+ * table so the columns line up — a status dot (🟢 live, 🟡 low bitrate,
+ * ⚫ offline), the name, whether it's going to the studio, and the bitrate
+ * note when low. Only the leading dot is an emoji, so the text columns
+ * stay aligned. Live streams first, then offline.
  *
  * The site's live list is the current truth for "is it live" — the events
  * feed only says when a hop last changed, so an old camera "offline" event
@@ -80,44 +73,46 @@ function tagList(names) {
  * for streams that are live.
  */
 export function buildMediamtxMessage(mtx) {
-  const live = mtx.paths.filter((p) => p.live);
-  const toStudio = [];
-  const lowBitrate = [];
-  const liveOnly = [];
-  let studioCount = 0;
-  for (const p of live) {
-    const warnings = Object.entries(p.hops).filter(([, h]) => h?.status === 'warning');
-    if (warnings.length) {
-      const detail = warnings
-        .map(([hop, h]) => `${HOP_SHORT[hop] ?? hop}${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''}`)
-        .join(', ');
-      lowBitrate.push(`\`${p.path}\` · ${detail}`);
-    }
-    const studio = p.hops['server-studio']?.status;
-    const goingToStudio = studio === 'online' || studio === 'warning';
-    if (goingToStudio) studioCount++;
-    // A low-bitrate stream is listed once, under Low bitrate (its detail says which hop).
-    if (warnings.length) continue;
-    if (goingToStudio) toStudio.push(p.path);
-    else liveOnly.push(p.path);
-  }
-  const offline = mtx.paths.filter((p) => !p.live).map((p) => p.path);
+  const ordered = [...mtx.paths.filter((p) => p.live), ...mtx.paths.filter((p) => !p.live)];
+  const nameWidth = Math.min(NAME_WIDTH_MAX, Math.max(6, ...ordered.map((p) => p.path.length)));
+  const pad = (text, width) => (text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width));
 
-  const header = [`## ${live.length} live${studioCount ? ` · ${studioCount} to studio` : ''}`];
-  header.push(`-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`);
-  if (mtx.error) header.push(`⚠️ ${mtx.error.slice(0, 300)}`);
-  if (mtx.paths.length === 0) header.push('No streams right now.');
+  let studioCount = 0;
+  let lowCount = 0;
+  const rows = ordered.map((p) => {
+    if (!p.live) return `⚫ ${pad(p.path, nameWidth)}  offline`;
+    const warnings = Object.entries(p.hops).filter(([, h]) => h?.status === 'warning');
+    const studio = p.hops['server-studio']?.status;
+    const toStudio = studio === 'online' || studio === 'warning';
+    if (toStudio) studioCount++;
+    if (warnings.length) lowCount++;
+    const note = warnings
+      .map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`)
+      .join(', ');
+    return `${warnings.length ? '🟡' : '🟢'} ${pad(p.path, nameWidth)}  ${pad(toStudio ? 'to studio' : 'live', 9)}${note ? `  ${note}` : ''}`.trimEnd();
+  });
+
+  let table = `   ${pad('STREAM', nameWidth)}  STATUS`;
+  for (let i = 0; i < rows.length; i++) {
+    if (table.length + rows[i].length + 20 > TABLE_MAX_CHARS) {
+      table += `\n   +${rows.length - i} more`;
+      break;
+    }
+    table += `\n${rows[i]}`;
+  }
+
+  const live = mtx.paths.filter((p) => p.live).length;
+  const lines = [
+    `## ${live} live${studioCount ? ` · ${studioCount} to studio` : ''}${lowCount ? ` · ${lowCount} low` : ''}`,
+    `-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+  ];
+  if (mtx.error) lines.push(`⚠️ ${mtx.error.slice(0, 300)}`);
+  lines.push(rows.length ? `\`\`\`\n${table}\n\`\`\`` : 'No streams right now.');
 
   const embed = new EmbedBuilder()
     .setTitle('MediaMTX')
-    .setDescription(header.join('\n'))
-    .setColor(mtx.error || lowBitrate.length ? 0xfee75c : live.length ? 0x57f287 : 0x4f545c);
-
-  if (toStudio.length) embed.addFields({ name: `📺 To studio · ${toStudio.length}`, value: tagList(toStudio) });
-  if (lowBitrate.length) embed.addFields({ name: `⚠️ Low bitrate · ${lowBitrate.length}`, value: lowBitrate.join('\n').slice(0, 1024) });
-  if (liveOnly.length) embed.addFields({ name: `🟢 Live · ${liveOnly.length}`, value: tagList(liveOnly) });
-  if (offline.length) embed.addFields({ name: `⚫ Offline · ${offline.length}`, value: `-# ${offline.join(', ')}`.slice(0, 1024) });
-
+    .setDescription(lines.join('\n'))
+    .setColor(mtx.error || lowCount ? 0xfee75c : live ? 0x57f287 : 0x4f545c);
   return { content: '', embeds: [embed], components: [] };
 }
 
