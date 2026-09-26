@@ -62,35 +62,44 @@ const TABLE_MAX_CHARS = 3600; // leaves room for the header lines in the 4096-ch
 
 /**
  * The MediaMTX panel (its own channel): one row per stream in a monospace
- * table so the columns line up — a status dot (🟢 live, 🟡 low bitrate,
- * ⚫ offline), the name, IN (a feed publishing to it), OUT (the studio
- * pulling it), and the bitrate note when low. Only the leading dot is an emoji, so the text columns
- * stay aligned. Live streams first, then offline.
+ * table so the columns line up — a status dot, the name, IN (a feed
+ * publishing to it), OUT (the studio pulling it), and a note when the
+ * bitrate is low. Only the leading dot is an emoji, so the text columns
+ * stay aligned.
  *
- * The site's live list is the current truth for "is it live" — the events
- * feed only says when a hop last changed, so an old camera "offline" event
- * on a stream that's live now is stale and ignored. Hop events only count
- * for streams that are live.
+ * Dot: 🟢 both in and out, 🟡 one of them, ⚫ neither. Rows are sorted the
+ * same way (🟢 first).
+ *
+ * IN comes from the site's live list, the current truth for "is something
+ * publishing". OUT comes from the latest server → studio event. Camera-hop
+ * events aren't used for IN: an old camera "offline" event on a stream that's
+ * live now is stale.
  */
 export function buildMediamtxMessage(mtx) {
-  const ordered = [...mtx.paths.filter((p) => p.live), ...mtx.paths.filter((p) => !p.live)];
-  const nameWidth = Math.min(NAME_WIDTH_MAX, Math.max(6, ...ordered.map((p) => p.path.length)));
   const pad = (text, width) => (text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width));
 
-  let studioCount = 0;
-  let lowCount = 0;
-  // IN: a feed is publishing into the stream. OUT: the studio is pulling it (server → studio hop).
-  const rows = ordered.map((p) => {
-    if (!p.live) return `⚫ ${pad(p.path, nameWidth)}  ${pad('—', 6)}${pad('—', 10)}offline`;
-    const warnings = Object.entries(p.hops).filter(([, h]) => h?.status === 'warning');
+  const streams = mtx.paths.map((p) => {
     const studio = p.hops['server-studio']?.status;
-    const toStudio = studio === 'online' || studio === 'warning';
-    if (toStudio) studioCount++;
-    if (warnings.length) lowCount++;
-    const note = warnings
-      .map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`)
-      .join(', ');
-    return `${warnings.length ? '🟡' : '🟢'} ${pad(p.path, nameWidth)}  ${pad('▶ in', 6)}${pad(toStudio ? '▶ studio' : '—', 10)}${note}`.trimEnd();
+    const out = studio === 'online' || studio === 'warning';
+    // Low-bitrate warnings only mean something while a feed is actually coming in.
+    const warnings = p.live ? Object.entries(p.hops).filter(([, h]) => h?.status === 'warning') : [];
+    return { ...p, in: p.live, out, warnings, activity: Number(p.live) + Number(out) };
+  });
+  streams.sort((a, b) => b.activity - a.activity);
+  const nameWidth = Math.min(NAME_WIDTH_MAX, Math.max(6, ...streams.map((s) => s.path.length)));
+
+  const studioCount = streams.filter((s) => s.out).length;
+  const lowCount = streams.filter((s) => s.warnings.length).length;
+  const rows = streams.map((s) => {
+    const dot = s.activity === 2 ? '🟢' : s.activity === 1 ? '🟡' : '⚫';
+    const note = s.warnings.length
+      ? s.warnings
+          .map(([hop, h]) => `low${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''} (${HOP_SHORT[hop] ?? hop})`)
+          .join(', ')
+      : s.activity === 0
+        ? 'offline'
+        : '';
+    return `${dot} ${pad(s.path, nameWidth)}  ${pad(s.in ? '▶ in' : '—', 6)}${pad(s.out ? '▶ studio' : '—', 10)}${note}`.trimEnd();
   });
 
   let table = `   ${pad('STREAM', nameWidth)}  ${pad('IN', 6)}OUT`;
