@@ -399,11 +399,17 @@ and the coms channel's LiveKit room, and mixes audio both ways.
   the bridge ends. The landing page shows what's open, with **End bridge**.
   Opening/ending needs Manage Channels or `COMS_ROLE_ID` (default
   `ALLOWED_ROLE_ID`). Picking another channel while one is open asks to
-  confirm the switch (it disconnects everyone in the current voice chat).
+  confirm the switch (it moves everyone in the voice chat onto the new one).
 - `/voice join channel:#voice coms:<channel>` (Manage Channels) — bridge an
   existing voice channel instead (never deleted afterwards).
 - Either way a control panel goes in the voice chat's text: who's on coms,
   and **Talk** / **Leave** buttons.
+  Its dropdown switches which coms channel the voice chat listens and talks
+  on, in place (nobody is disconnected): Talk resets to off, a bot-created
+  voice chat is renamed to match (Discord allows 2 renames per 10 minutes,
+  so quick switching renames a little later), and a channel that won't
+  connect falls back to the previous one. The landing page's Switch does
+  the same.
 - **Listen** is always on: everyone in the voice channel hears coms.
   **Talk** sends the voice channel's speakers out on coms while it's on —
   off by default so Discord chatter can't leak onto coms. Only people in

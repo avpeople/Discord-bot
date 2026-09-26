@@ -34,6 +34,7 @@ import { logEvent } from '../log-channel.js';
 
 const TALK_PREFIX = 'coms:talk:';
 const LEAVE_PREFIX = 'coms:leave:';
+const CHANNEL_SELECT_PREFIX = 'coms:channel:';
 const OPEN_SELECT_ID = 'coms:open';
 const SWITCH_PREFIX = 'coms:switch:';
 const END_ID = 'coms:end';
@@ -69,7 +70,32 @@ export function isComsInteraction(customId) {
 
 // ── voice chat control panel ───────────────────────────────────────────────
 
-function buildPanel(entry) {
+/** "Talking/listening on" dropdown: every coms channel, the current one selected. Null if the list can't be fetched. */
+async function buildComsSelectRow(bridge) {
+  let channels;
+  try {
+    ({ channels = [] } = await coms.getConfig());
+  } catch {
+    return null;
+  }
+  if (!channels.length) return null;
+  const options = channels.slice(0, 25).map((c) => ({
+    label: String(c.name).slice(0, 100),
+    description: c.description ? String(c.description).slice(0, 100) : undefined,
+    value: String(c.id),
+    emoji: '🎧',
+    default: String(c.id) === bridge.comsChannel.id,
+  }));
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`${CHANNEL_SELECT_PREFIX}${bridge.guild.id}`)
+      .setPlaceholder('Talk / listen on another coms channel...')
+      .setDisabled(Boolean(bridge.switching))
+      .addOptions(options),
+  );
+}
+
+async function buildPanel(entry) {
   const { bridge } = entry;
   const container = new ContainerBuilder().setAccentColor(bridge.talk ? 0xed4245 : 0x57f287);
   const text = (content) => container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
@@ -82,10 +108,13 @@ function buildPanel(entry) {
   );
   const people = bridge.comsParticipants();
   text(`**On coms (${people.length})** ${people.length ? people.join(', ') : '—'}`.slice(0, 1500));
+  const comsState = bridge.switching ? '⏳ switching' : bridge.comsReady ? '✅' : '⏳ reconnecting';
   text(
-    `-# Discord ${bridge.discordReady ? '✅' : '⏳'} · Coms ${bridge.comsReady ? '✅' : '⏳ reconnecting'} · started <t:${Math.floor(bridge.startedAt / 1000)}:R> by ${entry.startedBy}`,
+    `-# Discord ${bridge.discordReady ? '✅' : '⏳'} · Coms ${comsState} · started <t:${Math.floor(bridge.startedAt / 1000)}:R> by ${entry.startedBy}`,
   );
   container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
+  const selectRow = await buildComsSelectRow(bridge);
+  if (selectRow) container.addActionRowComponents(selectRow);
   container.addActionRowComponents(
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -115,7 +144,7 @@ function schedulePanelUpdate(entry) {
   entry.panelTimer = setTimeout(async () => {
     entry.panelTimer = null;
     if (entry.bridge.closed) return;
-    await entry.panel?.edit(buildPanel(entry)).catch((err) => console.error('[coms] panel update failed:', err.message));
+    await entry.panel?.edit(await buildPanel(entry)).catch((err) => console.error('[coms] panel update failed:', err.message));
     await refreshLanding(entry.bridge.guild.id);
   }, PANEL_DEBOUNCE_MS);
 }
@@ -294,7 +323,7 @@ async function startBridge({ guild, voiceChannel, comsChannel, user, createdChan
   }
 
   // The control panel lives in the voice chat's own text, where the people in it will see it.
-  entry.panel = await voiceChannel.send(buildPanel(entry)).catch(() => null);
+  entry.panel = await voiceChannel.send(await buildPanel(entry)).catch(() => null);
   startBackground();
   await refreshLanding(guild.id);
   await logEvent(guild.id, `🎧 ${user} opened ${voiceChannel} ↔ coms **${comsChannel.name}**`, 'studio');
@@ -492,7 +521,7 @@ async function handleOpen(interaction, comsChannelId) {
   }
   if (starting.has(guildId)) return interaction.reply(ephemeral('A coms bridge is starting right now — try again in a moment.'));
   if (entry) {
-    // One bridge per server: switching ends the current one, which drops everyone in its voice chat.
+    // One bridge per server: switching moves the open voice chat (and everyone in it) to the new coms channel.
     const target = await findComsChannel(comsChannelId).catch(() => null);
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -502,7 +531,7 @@ async function handleOpen(interaction, comsChannelId) {
     );
     return interaction.reply(
       ephemeral(
-        `**${entry.bridge.comsChannel.name}** is open in ${entry.bridge.voiceChannel} — the bot can only be in one voice chat per server. Switching ends it and disconnects everyone there.`,
+        `**${entry.bridge.comsChannel.name}** is open in ${entry.bridge.voiceChannel} — the bot can only be in one voice chat per server. Switching moves everyone in that voice chat onto **${target?.name ?? 'the new channel'}** (Talk turns off).`,
         { components: [row] },
       ),
     );
@@ -528,9 +557,16 @@ async function handleSwitch(interaction, comsChannelId) {
   await interaction.update({ content: '⏳ Switching...', components: [] });
   starting.add(guildId);
   try {
-    await active.get(guildId)?.bridge.close(`Switched by ${interaction.user.tag}`);
-    const voiceChannel = await openFromLanding(interaction, comsChannelId);
-    await interaction.editReply(`✅ Switched — ${voiceChannel} is open.`);
+    const entry = active.get(guildId);
+    if (entry) {
+      await switchEntry(entry, comsChannelId, interaction.user);
+      await entry.panel?.edit(await buildPanel(entry)).catch(() => {});
+      await interaction.editReply(`✅ Switched — ${entry.bridge.voiceChannel} is now on **${entry.bridge.comsChannel.name}**.`);
+    } else {
+      // It ended while the confirm was up — just open the new one.
+      const voiceChannel = await openFromLanding(interaction, comsChannelId);
+      await interaction.editReply(`✅ Opened ${voiceChannel}.`);
+    }
   } catch (err) {
     await interaction.editReply(`❌ ${err.message}`.slice(0, 2000));
   } finally {
@@ -562,7 +598,9 @@ export async function handleComsInteraction(interaction) {
   }
   if (id.startsWith(TALK_PREFIX)) {
     bridge.setTalk(!bridge.talk);
-    await interaction.update(buildPanel(entry));
+    // Acknowledge first: building the panel may wait on the coms server for its channel list.
+    await interaction.deferUpdate();
+    await interaction.editReply(await buildPanel(entry));
     await refreshLanding(interaction.guildId);
     await logEvent(
       interaction.guildId,
@@ -574,5 +612,42 @@ export async function handleComsInteraction(interaction) {
   if (id.startsWith(LEAVE_PREFIX)) {
     await interaction.deferUpdate();
     await bridge.close(`Closed by ${interaction.user.tag}`);
+    return;
   }
+  if (id.startsWith(CHANNEL_SELECT_PREFIX)) {
+    const target = interaction.values[0];
+    if (target === bridge.comsChannel.id) return interaction.deferUpdate();
+    await interaction.deferUpdate();
+    try {
+      await switchEntry(entry, target, interaction.user);
+    } catch (err) {
+      await interaction.followUp(ephemeral(`❌ ${err.message}`));
+    }
+    await interaction.editReply(await buildPanel(entry)).catch(() => {}); // also resets the dropdown's shown pick on failure
+  }
+}
+
+/**
+ * Moves a running bridge to another coms channel in place — the voice chat
+ * and everyone in it stay put. A voice chat the bot created is renamed to
+ * match; Discord allows 2 renames per channel per 10 minutes, so after
+ * quick switching the rename lands a little later (not awaited).
+ */
+async function switchEntry(entry, comsChannelId, user) {
+  const { bridge } = entry;
+  const comsChannel = await findComsChannel(comsChannelId);
+  if (!comsChannel) throw new Error('That coms channel no longer exists.');
+  const from = bridge.comsChannel.name;
+  await bridge.switchComs({ id: String(comsChannel.id), name: comsChannel.name });
+  if (entry.createdChannel) {
+    bridge.voiceChannel
+      .setName(`🎧 ${comsChannel.name}`.slice(0, 100), `Coms bridge switched to "${comsChannel.name}" by ${user.tag}`)
+      .catch((err) => console.error('[coms] voice chat rename failed:', err.message));
+  }
+  await refreshLanding(bridge.guild.id);
+  await logEvent(
+    bridge.guild.id,
+    `🔀 ${user} switched ${bridge.voiceChannel} from coms **${from}** to **${comsChannel.name}** (Talk reset to off)`,
+    'studio',
+  );
 }

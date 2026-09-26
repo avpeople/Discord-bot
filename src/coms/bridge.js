@@ -239,6 +239,48 @@ export class ComsBridge extends EventEmitter {
 
   // ── controls ─────────────────────────────────────────────────────────────
 
+  /**
+   * Moves the bridge to another coms channel, keeping the Discord side
+   * connected. Talk is turned off first so nobody is suddenly live on the new
+   * channel. If the new channel won't connect, goes back to the old one
+   * (and closes only if that fails too). Throws the new channel's error.
+   */
+  async switchComs(comsChannel) {
+    if (this.switching) throw new Error('Already switching coms channels — try again in a moment.');
+    this.switching = true;
+    const previous = this.comsChannel;
+    try {
+      this.setTalk(false);
+      await this.leaveComs();
+      this.comsChannel = comsChannel;
+      this.emit('update');
+      try {
+        await this.connectComs();
+      } catch (err) {
+        this.comsChannel = previous;
+        try {
+          await this.connectComs();
+        } catch {
+          this.close(`Couldn't reconnect to coms after a failed switch: ${err.message}`);
+        }
+        throw err;
+      }
+    } finally {
+      this.switching = false;
+      this.emit('update');
+    }
+  }
+
+  /** Disconnects from the current coms room without closing the bridge (its Disconnected event is ignored). */
+  async leaveComs() {
+    const room = this.room;
+    this.room = null;
+    this.source = null;
+    this.comsReady = false;
+    this.fromComs.clear();
+    await room?.disconnect().catch(() => {});
+  }
+
   setTalk(on) {
     this.talk = on;
     if (!on) {
