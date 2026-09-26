@@ -2,15 +2,10 @@ import { MessageFlags, PermissionsBitField } from 'discord.js';
 import { buildRepoPickerReply, PERSISTENT_REPO_SELECT_ID } from './repo-picker.js';
 import { getPickerChannel, setPickerChannel } from './picker-channel-store.js';
 import { hasAccess, createSessionForRepo } from './handlers.js';
-import { buildOpenSessionRow } from './reply.js';
+import { buildOpenSessionRow, postTemporaryNotice } from './reply.js';
 
-const CONFIRMATION_VISIBLE_MS = 10_000;
 // How often the picker message is re-rendered to update the usage bars.
 const USAGE_REFRESH_MS = 3 * 60 * 1000;
-
-// Picker messages currently showing a "session started" confirmation — the
-// usage refresh leaves these alone so it doesn't cut the confirmation short.
-const confirmingMessageIds = new Set();
 
 /** Only members who can manage channels may designate the picker channel — this is server config, not a per-session action. */
 function canManage(member) {
@@ -43,10 +38,9 @@ export async function handleSetPickerChannel(interaction) {
 
 /**
  * Repo picked from the persistent picker channel's select menu. Creates
- * the session the same way `/code new` does, then shows a temporary
- * confirmation in the picker channel itself (per the user's request — not
- * ephemeral, so anyone watching the channel sees it happened) before
- * reverting that message back to the plain picker after ~10s.
+ * the session the same way `/code new` does. The picker stays put; the
+ * confirmation (who started what, with an Open Session link) is posted
+ * underneath it for anyone watching the channel and deleted after ~10s.
  */
 export async function handlePersistentRepoSelected(interaction, sessionManager) {
   if (!hasAccess(interaction)) {
@@ -61,33 +55,26 @@ export async function handlePersistentRepoSelected(interaction, sessionManager) 
   const fullName = interaction.values[0];
   const pickerMessage = interaction.message;
 
-  let sessionChannel;
   try {
-    sessionChannel = await createSessionForRepo({
+    const sessionChannel = await createSessionForRepo({
       guild: interaction.guild,
       user: interaction.user,
       fullName,
       sessionManager,
     });
+    await postTemporaryNotice(pickerMessage.channel, {
+      content: `✅ ${interaction.user} started a session for **${fullName}**: ${sessionChannel}`,
+      components: [buildOpenSessionRow(interaction.guildId, sessionChannel.id)],
+    });
   } catch (err) {
     console.error(err);
-    await pickerMessage
-      .edit({ content: `❌ Couldn't start a session for \`${fullName}\`: ${err.message}`.slice(0, 2000), components: [] })
-      .catch(() => {});
-    await resetToPicker(pickerMessage);
-    return;
+    await postTemporaryNotice(pickerMessage.channel, {
+      content: `❌ Couldn't start a session for \`${fullName}\`: ${err.message}`.slice(0, 2000),
+    }).catch(() => {});
   }
 
-  confirmingMessageIds.add(pickerMessage.id);
-  await pickerMessage.edit({
-    content: `✅ ${interaction.user} started a session for **${fullName}**: ${sessionChannel}`,
-    components: [buildOpenSessionRow(interaction.guildId, sessionChannel.id)],
-  });
-
-  setTimeout(() => {
-    confirmingMessageIds.delete(pickerMessage.id);
-    resetToPicker(pickerMessage).catch((err) => console.error('Failed to reset picker channel message:', err));
-  }, CONFIRMATION_VISIBLE_MS);
+  // Re-render the picker so its dropdown no longer shows the repo just picked.
+  await resetToPicker(pickerMessage).catch((err) => console.error('Failed to reset picker channel message:', err));
 }
 
 async function resetToPicker(message) {
@@ -97,9 +84,9 @@ async function resetToPicker(message) {
 
 /**
  * Called once on boot per restored guild config, so the picker message
- * reflects the current repo list and select menu even if the bot restarted
- * mid-confirmation-window. Re-fetches the message by id rather than
- * re-posting, so the channel never ends up with two picker messages.
+ * reflects the current repo list and select menu after a deploy.
+ * Re-fetches the message by id rather than re-posting, so the channel
+ * never ends up with two picker messages.
  */
 export async function resyncPickerChannel(client, guildId) {
   const entry = getPickerChannel(guildId);
@@ -122,13 +109,13 @@ export function startPickerUsageRefresh(client) {
   setInterval(async () => {
     for (const guild of client.guilds.cache.values()) {
       const entry = getPickerChannel(guild.id);
-      if (!entry || confirmingMessageIds.has(entry.messageId)) continue;
+      if (!entry) continue;
       try {
         const channel = await client.channels.fetch(entry.channelId).catch(() => null);
         const message = await channel?.messages.fetch(entry.messageId).catch(() => null);
         if (!message) continue;
         const reply = await buildRepoPickerReply(PERSISTENT_REPO_SELECT_ID);
-        if (reply.content === message.content || confirmingMessageIds.has(message.id)) continue;
+        if (reply.content === message.content) continue;
         await message.edit(reply);
       } catch (err) {
         console.error('Failed to refresh picker usage:', err);

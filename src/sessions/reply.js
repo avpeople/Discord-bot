@@ -212,6 +212,21 @@ export function buildOpenSessionRow(guildId, channelId) {
   );
 }
 
+const TEMPORARY_NOTICE_MS = 10_000;
+
+/**
+ * Posts `payload` as a plain message in `channel` and deletes it after ~10s
+ * — used under the picker when a session or chat starts. A plain message
+ * rather than an interaction reply, so Discord doesn't show the picker
+ * message quoted above it. Mentions are shown but never ping.
+ */
+export async function postTemporaryNotice(channel, payload) {
+  const message = await channel.send({ ...payload, allowedMentions: { parse: [] } });
+  setTimeout(() => {
+    message.delete().catch(() => {});
+  }, TEMPORARY_NOTICE_MS);
+}
+
 /**
  * The Commit / Keep Going / Show Changes / Fresh Start / Exit action row
  * shown after each Claude reply. Commit commits everything changed so far,

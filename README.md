@@ -110,14 +110,15 @@ designates a channel that always shows the repo picker — open it and
 there's just a dropdown waiting, no need to run `/code new` each time.
 
 - Picking a repo there works the same as `/code new` (same access check,
-  same session creation), but the confirmation — who started a session and
-  a link to it — replaces the picker message for ~10 seconds, then it
-  reverts back to the plain picker automatically
+  same session creation). The picker stays put; the confirmation — who
+  started a session and a link to it — is posted underneath it and deleted
+  after ~10 seconds
   ([src/sessions/picker-channel-handlers.js](src/sessions/picker-channel-handlers.js)).
+  The Chat with Claude button there does the same.
 - Anyone with `ALLOWED_ROLE_ID` can use it, same as the ephemeral picker.
 - The channel/message ids are persisted (same pattern as session state),
-  and the bot re-syncs the message back to the plain picker on boot in
-  case it restarted mid-confirmation-window.
+  and the bot re-renders the picker message on boot so it picks up any
+  changes from the deploy.
 - Only one picker channel per server. Running the command again in a
   different channel moves it there; the old channel keeps whatever its
   last message was (nothing un-sets it automatically).

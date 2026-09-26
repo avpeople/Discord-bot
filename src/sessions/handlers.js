@@ -10,6 +10,7 @@ import {
   buildOptionsRows,
   buildClosePromptRow,
   buildOpenSessionRow,
+  postTemporaryNotice,
   buildStopRow,
   buildIdleWarningRow,
   buildUndoRow,
@@ -131,11 +132,22 @@ export async function createSessionForRepo({ guild, user, fullName, sessionManag
 /**
  * `/code chat`, or the Chat with Claude button under the repo picker —
  * opens a private channel with a plain Claude conversation (no repo).
+ * From a button on a channel message (the picker channel, a chat-button
+ * channel), the confirmation is a plain message deleted after ~10s — a
+ * reply there would show the whole picker message quoted above it.
  */
 export async function handleCodeChat(interaction, sessionManager) {
   if (!hasAccess(interaction)) return replyNoAccess(interaction);
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const fromChannelMessage = interaction.isButton() && !interaction.message.flags.has(MessageFlags.Ephemeral);
+  if (fromChannelMessage) {
+    await interaction.deferUpdate();
+  } else {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+  const confirm = (payload) =>
+    fromChannelMessage ? postTemporaryNotice(interaction.channel, payload) : interaction.editReply(payload);
+
   try {
     const channel = await createSessionChannel({
       guild: interaction.guild,
@@ -151,13 +163,13 @@ export async function handleCodeChat(interaction, sessionManager) {
     });
     await channel.send(buildSessionPanel(session));
     logEvent(interaction.guildId, `💬 ${interaction.user} opened a chat: ${channel}`);
-    await interaction.editReply({
-      content: `✅ Created ${channel}. Say hi!`,
+    await confirm({
+      content: fromChannelMessage ? `✅ ${interaction.user} started a chat: ${channel}` : `✅ Created ${channel}. Say hi!`,
       components: [buildOpenSessionRow(interaction.guildId, channel.id)],
     });
   } catch (err) {
     console.error(err);
-    await interaction.editReply(`❌ Couldn't start a chat: ${err.message}`.slice(0, 2000));
+    await confirm({ content: `❌ Couldn't start a chat: ${err.message}`.slice(0, 2000) }).catch(() => {});
   }
 }
 
