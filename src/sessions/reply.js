@@ -59,12 +59,11 @@ export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) 
   return [buildModelSelectRow(model, defaultModel), buttons];
 }
 
-/** The chat version of the panel: model dropdown, New Chat and Close — no repo buttons. */
+/** The chat version of the panel: model dropdown and Close — no repo buttons. New chats come from the picker. */
 export function buildChatPanelRows({ model, defaultModel }) {
   return [
     buildModelSelectRow(model, defaultModel),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('New Chat').setEmoji('🆕').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
     ),
   ];
@@ -265,10 +264,9 @@ export function buildPostReplyRow({ used } = {}) {
   return row;
 }
 
-/** The row under each reply in a chat session: New Chat (forgets the conversation) and Exit. */
+/** The row under each reply in a chat session: just Exit. New chats come from the picker. */
 export function buildChatReplyRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('New Chat').setEmoji('🆕').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger),
   );
 }

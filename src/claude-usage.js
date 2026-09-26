@@ -101,11 +101,20 @@ function bar(percent) {
   return SQUARES[color].repeat(filled) + '⬛'.repeat(BAR_WIDTH - filled);
 }
 
+/** The window's reset time if it's still ahead, else null. */
+function upcomingReset(w) {
+  return w.resetsAt && w.resetsAt > Date.now() ? w.resetsAt : null;
+}
+
+/** The window's percent used — 0 once its reset has passed since the last fetch, as it has started over. */
+function currentPercent(w) {
+  return w.resetsAt && !upcomingReset(w) ? 0 : w.percent;
+}
+
 /** `<bar> **50%** · resets <time>` for one usage window. */
 function formatBarLine(w, resetStyle) {
-  // A window whose reset has passed since the last fetch has started over.
-  const reset = w.resetsAt && w.resetsAt > Date.now() ? w.resetsAt : null;
-  const percent = w.resetsAt && !reset ? 0 : w.percent;
+  const reset = upcomingReset(w);
+  const percent = currentPercent(w);
   const unix = reset ? Math.floor(reset / 1000) : null;
   const resetText = unix ? ` · resets <t:${unix}:${resetStyle}>` : '';
   return `${bar(percent)} **${Math.round(percent)}%**${resetText}`;
@@ -140,5 +149,13 @@ export function formatClaudeUsage(usage) {
  */
 export function formatSessionUsageLine(usage) {
   if (!usage?.fiveHour) return '';
-  return `Session ${formatBarLine(usage.fiveHour, 'R')}`;
+  return `**Session** ${formatBarLine(usage.fiveHour, 'R')}`;
+}
+
+const EMBED_COLORS = { green: 0x23a55a, yellow: 0xf0b232, red: 0xf23f43 };
+
+/** Embed stripe colour matching the session bar, or null if usage isn't available. */
+export function sessionUsageColor(usage) {
+  if (!usage?.fiveHour) return null;
+  return EMBED_COLORS[barColor(currentPercent(usage.fiveHour))];
 }
