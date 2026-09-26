@@ -62,9 +62,13 @@ async function fetchUsage() {
   };
 }
 
-/** The latest usage (possibly stale — see `fetchedAt`), or null if it's never been available. */
-export async function getClaudeUsage() {
-  if (Date.now() - lastAttemptAt >= CACHE_MS) {
+/**
+ * The latest usage (possibly stale — see `fetchedAt`), or null if it's never
+ * been available. `fresh` skips the cache, for right after a Claude turn
+ * when the numbers have just moved.
+ */
+export async function getClaudeUsage({ fresh = false } = {}) {
+  if (fresh || Date.now() - lastAttemptAt >= CACHE_MS) {
     lastAttemptAt = Date.now();
     inFlight = fetchUsage()
       .catch((err) => console.error('Failed to fetch Claude usage:', err.message))
@@ -97,14 +101,19 @@ function bar(percent) {
   return SQUARES[color].repeat(filled) + '⬛'.repeat(BAR_WIDTH - filled);
 }
 
-function formatWindow(label, w, resetStyle) {
-  if (!w) return `${label} — no data`;
+/** `<bar> **50%** · resets <time>` for one usage window. */
+function formatBarLine(w, resetStyle) {
   // A window whose reset has passed since the last fetch has started over.
   const reset = w.resetsAt && w.resetsAt > Date.now() ? w.resetsAt : null;
   const percent = w.resetsAt && !reset ? 0 : w.percent;
   const unix = reset ? Math.floor(reset / 1000) : null;
   const resetText = unix ? ` · resets <t:${unix}:${resetStyle}>` : '';
-  return `**${label}**\n${bar(percent)} **${Math.round(percent)}%**${resetText}`;
+  return `${bar(percent)} **${Math.round(percent)}%**${resetText}`;
+}
+
+function formatWindow(label, w, resetStyle) {
+  if (!w) return `${label} — no data`;
+  return `**${label}**\n${formatBarLine(w, resetStyle)}`;
 }
 
 /**
@@ -123,4 +132,13 @@ export function formatClaudeUsage(usage) {
     lines.push(`-# Last checked <t:${Math.floor(usage.fetchedAt / 1000)}:R> — updates after the next Claude message`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Just the 5-hour session bar on one line, for the end of each Claude turn
+ * in session and chat channels. Returns '' if usage isn't available.
+ */
+export function formatSessionUsageLine(usage) {
+  if (!usage?.fiveHour) return '';
+  return `Session ${formatBarLine(usage.fiveHour, 'R')}`;
 }

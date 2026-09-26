@@ -50,10 +50,13 @@ import * as coolify from '../coolify.js';
 import { STATUS_DIVIDER, decorateResources, describeResource, buildAppSelectRow } from '../coolify-view.js';
 import { downloadAttachments } from './attachments.js';
 import { logEvent } from '../log-channel.js';
+import { getClaudeUsage, formatSessionUsageLine } from '../claude-usage.js';
 
 // Discord rate-limits message edits (roughly 5 per 5s per channel), so the
 // live progress line is batched to at most one edit per this interval.
 const PROGRESS_EDIT_INTERVAL_MS = 2000;
+// How long the end-of-turn message waits on the usage endpoint before going without the bar.
+const USAGE_LINE_TIMEOUT_MS = 3000;
 const PROGRESS_LINES_SHOWN = 5;
 
 const MODEL_LABELS = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
@@ -298,6 +301,15 @@ async function runTurn(session, channel, text, sessionManager) {
     session.pendingNote = null;
   }
 
+  // The account's 5-hour usage bar for the top of the end-of-turn message.
+  // Fetched fresh since the turn just used some; capped so a slow usage
+  // endpoint never holds up the reply.
+  const usageLine = () =>
+    Promise.race([
+      getClaudeUsage({ fresh: true }).then(formatSessionUsageLine).catch(() => ''),
+      new Promise((resolve) => setTimeout(() => resolve(''), USAGE_LINE_TIMEOUT_MS)),
+    ]);
+
   let toolCallCount = 0;
   const progress = [];
   let editTimer = null;
@@ -343,7 +355,10 @@ async function runTurn(session, channel, text, sessionManager) {
           : `${stoppedAt} Any file changes made so far are kept${undoRow ? ' — use Undo to roll them back' : ''}.`,
         components: [],
       });
-      await channel.send({ content: 'What next?', components: [replyRow(), ...(undoRow ? [undoRow] : [])] });
+      await channel.send({
+        content: [await usageLine(), 'What next?'].filter(Boolean).join('\n'),
+        components: [replyRow(), ...(undoRow ? [undoRow] : [])],
+      });
       return;
     }
     if (!result) {
@@ -361,6 +376,7 @@ async function runTurn(session, channel, text, sessionManager) {
     const { text: replyText, options } = parseOptionsBlock(result.result || '(no text response)');
     session.pendingOptions = options;
 
+    const usagePromise = usageLine();
     const chunks = chunkMessage(replyText);
     await thinking.edit({ content: chunks[0], components: [] });
     for (const extra of chunks.slice(1)) {
@@ -369,15 +385,16 @@ async function runTurn(session, channel, text, sessionManager) {
 
     const stats = formatTurnStats(result, toolCallCount);
     const statsLine = stats ? `_(${stats} · session total ~$${session.totalCostUsd.toFixed(2)})_` : '';
+    const usage = await usagePromise;
     const extraRows = undoRow ? [undoRow] : [];
     if (options) {
       await channel.send({
-        content: `Pick one: ${statsLine}`.trim(),
+        content: [usage, `Pick one: ${statsLine}`.trim()].filter(Boolean).join('\n'),
         components: [...buildOptionsRows(options), ...extraRows],
       });
     } else {
       await channel.send({
-        content: statsLine || 'What next?',
+        content: [usage, statsLine || 'What next?'].filter(Boolean).join('\n'),
         components: [replyRow(), ...extraRows],
       });
     }
