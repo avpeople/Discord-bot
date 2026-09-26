@@ -42,16 +42,17 @@ export function latestSnapshots() {
 async function fetchDetails(unit, state) {
   if (state === 'offline') return null;
   const id = unit.BOSSID;
-  const [interfaces, video, destinations] = await Promise.allSettled([
+  const value = (result, fallback = null) => (result.status === 'fulfilled' ? result.value : fallback);
+  const [interfaces, video, status, stream] = await Promise.allSettled([
     liveu.getInterfaces(id),
     liveu.getVideo(id),
-    state === 'live' ? liveu.getDestinations(id) : Promise.resolve([]),
+    liveu.getStatus(id),
+    liveu.getStream(id),
   ]);
-  return {
-    interfaces: interfaces.status === 'fulfilled' ? interfaces.value : null,
-    video: video.status === 'fulfilled' ? video.value : null,
-    destinations: destinations.status === 'fulfilled' ? destinations.value : [],
-  };
+  const details = { interfaces: value(interfaces), video: value(video), status: value(status), stream: value(stream), destinations: [] };
+  // No named destination from /stream — fall back to the unit's preset list for a name to show.
+  if (!details.stream?.destinationName) details.destinations = await liveu.getDestinations(id).catch(() => []);
+  return details;
 }
 
 async function collectSnapshots() {
@@ -78,7 +79,7 @@ function stateEvents(prev, next) {
     return events; // everything else about it is moot
   }
   if (prev.state !== 'live' && next.state === 'live') {
-    events.push(`🔴 ${name} is **LIVE**${next.activePreset ? ` to **${next.activePreset}**` : ''}`);
+    events.push(`🔴 ${name} is **LIVE**${next.destination ? ` to **${next.destination}**` : ''}`);
   }
   if (prev.state === 'live' && next.state === 'online') events.push(`⏹️ ${name} stopped streaming`);
 
@@ -173,8 +174,8 @@ const renderQueues = new Map(); // guildId -> promise of the render in flight
 
 /**
  * Brings one guild's status channel in line with `snapshots`. Missing
- * messages (first setup, new unit, someone deleted one) are posted; units
- * no longer on the account have their message removed. Renders for a guild
+ * messages (a unit came online, someone deleted one) are posted; units that
+ * went offline or left the account have their message removed. Renders for a guild
  * run one at a time, so two can't both post a missing message.
  */
 export function renderPanel(guildId, snapshots, error = null) {
@@ -209,8 +210,10 @@ async function renderPanelNow(guildId, snapshots, error) {
   // On an API error, keep showing the last known unit boxes rather than blanking them.
   if (error) return;
 
+  // Only online/live units get a box; offline ones are just named in the summary.
+  const shown = snapshots.filter((s) => s.state !== 'offline');
   const unitMessages = { ...cfg.unitMessages };
-  for (const snap of snapshots) {
+  for (const snap of shown) {
     const payload = buildUnitMessage(snap);
     const message = await fetchMessage(channel, unitMessages[snap.id]);
     if (message) {
@@ -221,9 +224,9 @@ async function renderPanelNow(guildId, snapshots, error) {
       unitMessages[snap.id] = sent.id;
     }
   }
-  const currentIds = new Set(snapshots.map((s) => s.id));
+  const shownIds = new Set(shown.map((s) => s.id));
   for (const [id, messageId] of Object.entries(unitMessages)) {
-    if (currentIds.has(id)) continue;
+    if (shownIds.has(id)) continue;
     const message = await fetchMessage(channel, messageId);
     await message?.delete().catch(() => {});
     delete unitMessages[id];

@@ -122,31 +122,44 @@ export function getVideo(bossId) {
   return central(`/units/${encodeURIComponent(bossId)}/status/video`);
 }
 
-/** The unit's stream presets (destinations): title, streaming_provider, is_active, ... */
+/** Raw general status for one unit (battery: { percentage, connected }, ...). */
+export function getStatus(bossId) {
+  return central(`/units/${encodeURIComponent(bossId)}/status`);
+}
+
+/**
+ * The unit's stream: { status: 'streaming' | ..., destination: <id>, destinationName }.
+ * `destination` is the unit's selected destination — what Go Live streams to —
+ * resolved to a name from the account's destination inventory.
+ */
+export async function getStream(bossId) {
+  const data = await central(`/units/${encodeURIComponent(bossId)}/stream`);
+  const stream = data?.data?.stream ?? data?.stream ?? null;
+  if (stream?.destination) {
+    const email = encodeURIComponent(config.liveu.email);
+    const dest = await central(`/inventories/${email}/destinations/${encodeURIComponent(stream.destination)}`).catch(() => null);
+    const d = dest?.data?.destination ?? dest?.data ?? dest;
+    stream.destinationName = d?.name ?? d?.title ?? null;
+  }
+  return stream;
+}
+
+/** The unit's stream presets as the Solo portal lists them: title, streaming_provider, is_active, ... */
 export async function getDestinations(bossId) {
   const data = await request(`${SOLO_API_DIRECT}/streamtooldestinations?unit_id=${encodeURIComponent(bossId)}`);
   return data?.data?.response ?? [];
 }
 
-// TODO: the start/stop endpoints below were never captured from the
-// solo.liveu.tv portal's DevTools — they're the `liveu api` project's
-// placeholders. Capture the real request the portal's "Go Live" / "Stop"
-// buttons send (URL, method, body) and put it here; nothing else changes.
+// Same calls the Studio Patch app's Start/Stop Stream buttons use. Go Live
+// streams to the unit's currently selected destination (see getStream).
 
-export function startStream(bossId, destination) {
-  return request(`${SOLO_API_DIRECT}/streamtools/start`, {
+export function startStream(bossId) {
+  return central(`/units/${encodeURIComponent(bossId)}/stream`, {
     method: 'POST',
-    body: JSON.stringify({ boss_id: bossId, destination_id: destinationId(destination) }),
+    body: JSON.stringify({ unit_id: bossId }),
   });
 }
 
 export function stopStream(bossId) {
-  return request(`${SOLO_API_DIRECT}/streamtools/stop`, {
-    method: 'POST',
-    body: JSON.stringify({ boss_id: bossId }),
-  });
-}
-
-export function destinationId(destination) {
-  return String(destination?.id ?? destination?.destination_id ?? destination?.external_id ?? '');
+  return central(`/units/${encodeURIComponent(bossId)}/stream`, { method: 'DELETE' });
 }

@@ -1,12 +1,4 @@
-import {
-  ActionRowBuilder,
-  AttachmentBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  MessageFlags,
-  PermissionsBitField,
-  StringSelectMenuBuilder,
-} from 'discord.js';
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionsBitField } from 'discord.js';
 import { config } from '../config.js';
 import * as liveu from './client.js';
 import { unitState } from './parse.js';
@@ -15,7 +7,7 @@ import { isMonitoring, latestSnapshots, pollNow, renderPanel } from './monitor.j
 import { formatBitrate, GO_LIVE_PREFIX, STOP_PREFIX } from './view.js';
 import { logEvent } from '../log-channel.js';
 
-const START_SELECT_PREFIX = 'liveu:start:';
+const GO_LIVE_CONFIRM_PREFIX = 'liveu:go-live-confirm:';
 const STOP_CONFIRM_PREFIX = 'liveu:stop-confirm:';
 
 export function isLiveuInteraction(customId) {
@@ -102,6 +94,8 @@ export async function handleLiveuRaw(interaction) {
       unit,
       interfaces: await settle(liveu.getInterfaces(unit.BOSSID)),
       video: await settle(liveu.getVideo(unit.BOSSID)),
+      status: await settle(liveu.getStatus(unit.BOSSID)),
+      stream: await settle(liveu.getStream(unit.BOSSID)),
       destinations: await settle(liveu.getDestinations(unit.BOSSID)),
     };
     const file = new AttachmentBuilder(Buffer.from(JSON.stringify(raw, null, 2)), { name: `liveu-${unit.SN ?? unit.BOSSID}.json` });
@@ -114,42 +108,29 @@ export async function handleLiveuRaw(interaction) {
   }
 }
 
-/** Go Live on a unit's box: pick which stream preset to go live to. Picking one is the confirmation. */
+/**
+ * Go Live on a unit's box: confirm first, naming where it'll stream to —
+ * LiveU streams to the unit's currently selected destination.
+ */
 async function handleGoLiveButton(interaction, bossId) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const presets = await liveu.getDestinations(bossId).catch((err) => err);
-  if (presets instanceof Error) return interaction.editReply(`❌ Couldn't load stream presets: ${presets.message}`.slice(0, 2000));
-  const usable = presets.filter((d) => liveu.destinationId(d)).slice(0, 25);
-  if (usable.length === 0) {
-    return interaction.editReply(`**${unitName(bossId)}** has no stream presets — add one in the LiveU Solo portal first.`);
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId(`${START_SELECT_PREFIX}${bossId}`)
-    .setPlaceholder('Choose where to go live...')
-    .addOptions(
-      usable.map((d) => ({
-        label: String(d.title || 'Untitled preset').slice(0, 100),
-        description: String(d.streaming_profile || d.streaming_provider || '').slice(0, 100) || undefined,
-        value: liveu.destinationId(d),
-      })),
-    );
+  const stream = await liveu.getStream(bossId).catch(() => null);
+  const destination = stream?.destinationName ?? latestSnapshots().find((s) => s.id === bossId)?.destination;
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`${GO_LIVE_CONFIRM_PREFIX}${bossId}`).setLabel('Yes, go live').setEmoji('🔴').setStyle(ButtonStyle.Success),
+  );
   await interaction.editReply({
-    content: `🔴 Go live on **${unitName(bossId)}** — choosing a preset starts the stream.`,
-    components: [new ActionRowBuilder().addComponents(select)],
+    content: `🔴 Go live on **${unitName(bossId)}**${destination ? ` → **${destination}**` : ' (to its selected destination)'}?`,
+    components: [row],
   });
 }
 
-async function handleStartSelect(interaction, bossId) {
-  const destId = interaction.values[0];
+async function handleGoLiveConfirm(interaction, bossId) {
   await interaction.update({ content: `⏳ Starting **${unitName(bossId)}**...`, components: [] });
   try {
-    const presets = await liveu.getDestinations(bossId);
-    const preset = presets.find((d) => liveu.destinationId(d) === destId);
-    await liveu.startStream(bossId, preset ?? { id: destId });
-    const title = preset?.title ?? 'preset';
-    await interaction.editReply(`✅ Go Live sent to **${unitName(bossId)}** → **${title}**. The board updates when LiveU reports it live.`);
-    await logEvent(interaction.guildId, `▶️ ${interaction.user} pressed **Go Live** on **${unitName(bossId)}** → **${title}**`, 'studio');
+    await liveu.startStream(bossId);
+    await interaction.editReply(`✅ Go Live sent to **${unitName(bossId)}**. The board updates when LiveU reports it live.`);
+    await logEvent(interaction.guildId, `▶️ ${interaction.user} pressed **Go Live** on **${unitName(bossId)}**`, 'studio');
   } catch (err) {
     await interaction.editReply(`❌ Couldn't start the stream: ${err.message}`.slice(0, 2000));
     return;
@@ -178,12 +159,12 @@ async function handleStopConfirm(interaction, bossId) {
   setTimeout(() => pollNow(), 3000);
 }
 
-/** Routes every `liveu:*` button and select menu. */
+/** Routes every `liveu:*` button. */
 export async function handleLiveuInteraction(interaction) {
   if (!canOperate(interaction)) return interaction.reply(ephemeral("You don't have permission to control the LiveUs."));
   const id = interaction.customId;
+  if (id.startsWith(GO_LIVE_CONFIRM_PREFIX)) return handleGoLiveConfirm(interaction, id.slice(GO_LIVE_CONFIRM_PREFIX.length));
   if (id.startsWith(GO_LIVE_PREFIX)) return handleGoLiveButton(interaction, id.slice(GO_LIVE_PREFIX.length));
-  if (id.startsWith(START_SELECT_PREFIX)) return handleStartSelect(interaction, id.slice(START_SELECT_PREFIX.length));
   if (id.startsWith(STOP_CONFIRM_PREFIX)) return handleStopConfirm(interaction, id.slice(STOP_CONFIRM_PREFIX.length));
   if (id.startsWith(STOP_PREFIX)) return handleStopButton(interaction, id.slice(STOP_PREFIX.length));
 }

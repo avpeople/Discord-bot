@@ -261,8 +261,8 @@ client.on('interactionCreate', async (interaction) => {
       return handleFreshStartButton(interaction, sessionManager);
     }
 
-    // LiveU status board: Go Live (preset picker) and Stop (with confirm).
-    if ((interaction.isButton() || interaction.isStringSelectMenu()) && isLiveuInteraction(interaction.customId)) {
+    // LiveU status board: Go Live and Stop, each with a confirm step.
+    if (interaction.isButton() && isLiveuInteraction(interaction.customId)) {
       return handleLiveuInteraction(interaction);
     }
 

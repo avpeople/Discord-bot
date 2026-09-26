@@ -6,6 +6,12 @@
  * null — the panel shows "—" and no alert fires, rather than guessing.
  * If something reads wrong, `/studio liveu-raw` dumps the real responses;
  * the fix is adding the right field name to a list here.
+ *
+ * Field names known to be real come from the Studio Patch app, which reads
+ * the same endpoints: interfaces have `port` (a number for the cellular
+ * modems), `name`, `connected`, `technology`, `uplinkKbps` and
+ * `upSignalQuality` / `signalQuality` (0–5 bars); `/status` has
+ * `battery.percentage`; `/stream` has `status: 'streaming'` while live.
  */
 
 /** First non-null value among `keys` on `obj`. */
@@ -66,11 +72,14 @@ function kbpsFrom(obj, kbpsKeys, otherKeys) {
   return other > 100_000 ? other / 1000 : other;
 }
 
+const isCellularPort = (port) => port !== null && port !== undefined && port !== '' && !Number.isNaN(Number.parseInt(port, 10));
+
 const SIM_PATTERN = /modem|sim|cell|lte|5g|4g|3g|umts|hspa|nr\b/i;
 const WIFI_PATTERN = /wi-?fi|wlan/i;
 const ETHERNET_PATTERN = /eth|lan|wired/i;
 
 function interfaceKind(item, name) {
+  if (isCellularPort(item?.port)) return 'sim';
   const hint = `${pick(item, ['technology', 'type', 'interfaceType', 'kind', 'network_type']) ?? ''} ${name}`;
   if (WIFI_PATTERN.test(hint)) return 'wifi';
   if (ETHERNET_PATTERN.test(hint)) return 'ethernet';
@@ -79,7 +88,11 @@ function interfaceKind(item, name) {
 }
 
 function parseInterface({ item, key }) {
-  const name = String(pick(item, ['name', 'displayName', 'display_name', 'port', 'portName', 'interfaceName', 'id']) ?? key);
+  // Cellular modems are numbered by port ("Modem 1"), and their `name` is the carrier.
+  const cellular = isCellularPort(item?.port);
+  const name = cellular
+    ? `Modem ${item.port}`
+    : String(pick(item, ['port', 'name', 'displayName', 'display_name', 'portName', 'interfaceName', 'id']) ?? key);
   const connected = bool(pick(item, ['connected', 'isConnected', 'is_connected', 'status', 'state', 'linkStatus']));
   const enabled = bool(pick(item, ['enabled', 'isEnabled', 'is_enabled']));
   return {
@@ -92,8 +105,8 @@ function parseInterface({ item, key }) {
       ['uplinkKbps', 'upstreamKbps', 'uplink_kbps', 'txKbps', 'tx_kbps', 'throughputKbps', 'bitrateKbps', 'kbps'],
       ['bitrate', 'tx_bitrate', 'txBitrate', 'uplink', 'throughput', 'bandwidth'],
     ),
-    signal: num(pick(item, ['signalQuality', 'signal_quality', 'signal', 'signalStrength', 'signal_strength', 'rssi', 'rsrp'])),
-    carrier: pick(item, ['operator', 'carrier', 'provider', 'networkName', 'network_name', 'plmn']),
+    signal: num(pick(item, ['upSignalQuality', 'signalQuality', 'signal_quality', 'signal', 'signalStrength', 'signal_strength', 'rssi', 'rsrp'])),
+    carrier: pick(item, cellular ? ['name', 'operator', 'carrier', 'provider', 'networkName'] : ['operator', 'carrier', 'provider', 'networkName', 'network_name', 'plmn']),
     technology: pick(item, ['technology', 'network_type', 'networkType', 'rat']),
   };
 }
@@ -104,7 +117,7 @@ function parseVideo(raw) {
 
   const width = num(pick(video, ['width', 'inputWidth']));
   const height = num(pick(video, ['height', 'inputHeight']));
-  let resolution = pick(video, ['resolution', 'inputResolution', 'input_resolution', 'videoResolution', 'format']);
+  let resolution = pick(video, ['resolution', 'input', 'video_type', 'inputResolution', 'input_resolution', 'videoResolution', 'format']);
   if (!resolution && width && height) resolution = `${width}x${height}`;
   if (typeof resolution === 'string' && /no\s*(input|signal|video)|unknown|n\/a/i.test(resolution)) resolution = null;
 
@@ -116,33 +129,44 @@ function parseVideo(raw) {
   return {
     inputConnected,
     resolution: resolution ? String(resolution) : null,
-    fps: num(pick(video, ['frameRate', 'framerate', 'frame_rate', 'fps'])),
+    fps: num(pick(video, ['fps', 'framerate', 'frame_rate', 'frameRate', 'videoFps'])),
     kbps: kbpsFrom(video, ['videoBitrateKbps', 'bitrateKbps', 'kbps'], ['videoBitrate', 'video_bitrate', 'bitrate', 'totalBitrate']),
     uptimeSec: num(pick(video, ['uptime', 'stream_uptime', 'streamUptime', 'streamingTime', 'duration'])),
   };
 }
 
-/** 'live' | 'online' | 'offline' from the unit list's status string. */
-export function unitState(unit) {
-  const s = String(unit?.status ?? '').toLowerCase();
-  if (s.includes('stream') || s.includes('live') || s.includes('broadcast')) return 'live';
-  if (s === 'online' || s.includes('ready') || s.includes('idle') || s.includes('connected')) return 'online';
+/** 'live' | 'online' | 'offline' from a status string (same mapping as the Studio Patch app). */
+function normaliseStatus(raw) {
+  const s = String(raw ?? '').toLowerCase().trim();
+  if (['streaming', 'live', 'on_air', 'broadcasting'].includes(s)) return 'live';
+  if (['online', 'connected', 'ready', 'idle', 'standby', 'active'].includes(s)) return 'online';
   return 'offline';
 }
 
+/** State from the unit list alone. The unit list can say 'online' while live — `/stream` is the real live check. */
+export function unitState(unit) {
+  return normaliseStatus(unit?.status);
+}
+
 /**
- * One unit's snapshot. `details` is { interfaces, video, destinations } raw
- * responses, or null/undefined for offline units (which aren't queried).
+ * One unit's snapshot. `details` is { interfaces, video, status, stream,
+ * destinations } (raw responses, `stream` already unwrapped by the client),
+ * or null/undefined for offline units (which aren't queried).
  */
 export function buildSnapshot(unit, details) {
-  const state = unitState(unit);
+  const streaming = String(details?.stream?.status ?? '').toLowerCase() === 'streaming';
+  const state = streaming ? 'live' : unitState(unit);
   const interfaces = details?.interfaces ? interfaceList(details.interfaces).map(parseInterface) : [];
   const video = parseVideo(details?.video);
 
   const connectedKbps = interfaces.filter((i) => i.connected !== false && i.kbps !== null).map((i) => i.kbps);
   const totalKbps = connectedKbps.length ? connectedKbps.reduce((a, b) => a + b, 0) : video.kbps;
 
-  const activeDestination = (details?.destinations ?? []).find((d) => d?.is_active);
+  const presets = details?.destinations ?? [];
+  const destination =
+    details?.stream?.destinationName ?? (presets.find((d) => d?.is_active) ?? presets[0])?.title ?? null;
+  const status = unwrap(details?.status);
+  const battery = status?.battery && typeof status.battery === 'object' ? status.battery : null;
 
   return {
     id: String(unit.BOSSID ?? unit.bossId ?? unit.id),
@@ -150,13 +174,15 @@ export function buildSnapshot(unit, details) {
     serial: unit.SN ?? unit.device_name ?? null,
     product: unit.product ?? null,
     swVersion: unit.sw_version ?? null,
-    battery: num(pick(unit, ['battery', 'battery_level', 'batteryLevel'])),
+    battery: battery ? num(battery.percentage) : num(pick(unit, ['battery', 'battery_level', 'batteryLevel'])),
+    charging: battery ? bool(battery.connected) : null,
     state,
     detailsOk: Boolean(details?.interfaces || details?.video),
     interfaces,
     sims: interfaces.filter((i) => i.kind === 'sim'),
     totalKbps: totalKbps ?? null,
     video,
-    activePreset: activeDestination?.title ?? null,
+    // What Go Live streams to (the unit's selected destination).
+    destination,
   };
 }

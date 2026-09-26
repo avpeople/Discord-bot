@@ -2,8 +2,8 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'disc
 
 /**
  * Renders the LiveU status channel: a summary message at the top
- * ("2 live · 1 online · 5 offline") and one message per unit with its
- * details and Go Live / Stop buttons.
+ * ("2 live · 1 online · 5 offline", offline units named there) and one
+ * message per online unit with its details and Go Live / Stop buttons.
  */
 
 export const GO_LIVE_PREFIX = 'liveu:go-live:';
@@ -27,13 +27,20 @@ function formatUptime(seconds) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
+/** LiveU reports signal as 0–5 bars. */
+function signalBars(signal) {
+  if (signal === null || signal === undefined) return null;
+  const n = Math.max(0, Math.min(5, Math.round(signal)));
+  return `${'▮'.repeat(n)}${'▯'.repeat(5 - n)}`;
+}
+
 function simLine(sim) {
   const icon = sim.connected === false ? '❌' : sim.connected ? '📶' : '❔';
   const parts = [
     sim.connected === false ? 'down' : formatBitrate(sim.kbps),
     sim.carrier,
     sim.technology,
-    sim.signal !== null ? `signal ${sim.signal}` : null,
+    signalBars(sim.signal),
   ].filter(Boolean);
   return `${icon} **${sim.name}** · ${parts.join(' · ')}`;
 }
@@ -48,6 +55,8 @@ export function buildSummaryMessage(snapshots, error) {
     `## 🔴 ${live} live   🟢 ${online} online   ⚫ ${offline} offline`,
     `-# ${snapshots.length} unit${snapshots.length === 1 ? '' : 's'} · updated <t:${Math.floor(Date.now() / 1000)}:R>`,
   ];
+  const offlineNames = snapshots.filter((s) => s.state === 'offline').map((s) => s.name);
+  if (offlineNames.length) lines.push(`-# ⚫ Offline: ${offlineNames.join(', ')}`.slice(0, 1000));
   if (error) lines.push(`⚠️ Can't reach LiveU right now: ${error.slice(0, 300)}`);
 
   const embed = new EmbedBuilder()
@@ -65,7 +74,7 @@ export function buildUnitMessage(snap) {
     .setFooter({ text: [snap.product, snap.serial, snap.swVersion && `SW ${snap.swVersion}`].filter(Boolean).join(' · ') || snap.id });
 
   const status = [`**${style.label}**`];
-  if (snap.state === 'live' && snap.activePreset) status.push(`to **${snap.activePreset}**`);
+  if (snap.destination) status.push(snap.state === 'live' ? `to **${snap.destination}**` : `· Go Live → **${snap.destination}**`);
   const uptime = snap.state === 'live' ? formatUptime(snap.video.uptimeSec) : null;
   if (uptime) status.push(`for ${uptime}`);
   embed.setDescription(status.join(' '));
@@ -84,7 +93,9 @@ export function buildUnitMessage(snap) {
       { name: 'Input', value: input, inline: true },
       { name: 'SIMs', value: snap.sims.length ? `${upSims} / ${snap.sims.length} up` : '—', inline: true },
     );
-    if (snap.battery !== null) embed.addFields({ name: 'Battery', value: `${snap.battery}%`, inline: true });
+    if (snap.battery !== null) {
+      embed.addFields({ name: 'Battery', value: `${snap.charging ? '🔌' : '🔋'} ${Math.round(snap.battery)}%`, inline: true });
+    }
 
     const links = snap.interfaces.map(simLine);
     if (links.length) embed.addFields({ name: 'Connections', value: links.join('\n').slice(0, 1024) });
