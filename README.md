@@ -393,13 +393,16 @@ and the coms channel's LiveKit room, and mixes audio both ways.
   `https://api-com.avp.nz`) and `COMS_BRIDGE_KEY`. The bot then shows as
   an online bridge in the admin console.
 - `/voice set-coms-channel channel:#coms` (Manage Channels) — posts the
-  **coms landing page** there: a dropdown of coms channels. Picking one
-  creates a voice chat **🎧 <coms channel>** in the landing channel's
-  category (e.g. Studio) and bridges it; the voice chat is deleted when
-  the bridge ends. The landing page shows what's open, with **End bridge**.
-  Opening/ending needs Manage Channels or `COMS_ROLE_ID` (default
-  `ALLOWED_ROLE_ID`). Picking another channel while one is open asks to
-  confirm the switch (it moves everyone in the voice chat onto the new one).
+  **coms landing page** there, the whole coms experience in one message.
+  Picking a coms channel from its dropdown creates a voice chat
+  **🎧 <coms channel>** in the landing channel's category (e.g. Studio) and
+  bridges it — the panel itself shows "Opening..." and then the open
+  bridge: who's on coms and in the voice chat, **Join voice chat** (a link
+  button straight into the call), **Talk** on/off, **End bridge**, and the
+  dropdown to switch coms channel (in place — nobody is disconnected). No
+  separate reply messages; only failures get a private one. The voice chat
+  is deleted when the bridge ends. Opening/ending needs Manage Channels or
+  `COMS_ROLE_ID` (default `ALLOWED_ROLE_ID`).
 - `/voice join channel:#voice coms:<channel>` (Manage Channels) — bridge an
   existing voice channel instead (never deleted afterwards).
 - Either way a control panel goes in the voice chat's text: who's on coms,
@@ -408,8 +411,7 @@ and the coms channel's LiveKit room, and mixes audio both ways.
   on, in place (nobody is disconnected): Talk resets to off, a bot-created
   voice chat is renamed to match (Discord allows 2 renames per 10 minutes,
   so quick switching renames a little later), and a channel that won't
-  connect falls back to the previous one. The landing page's Switch does
-  the same.
+  connect falls back to the previous one.
 - **Listen** is always on: everyone in the voice channel hears coms.
   **Talk** sends the voice channel's speakers out on coms while it's on —
   off by default so Discord chatter can't leak onto coms. Only people in
