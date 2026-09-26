@@ -1,4 +1,15 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ContainerBuilder,
+  EmbedBuilder,
+  MessageFlags,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  StringSelectMenuBuilder,
+  TextDisplayBuilder,
+} from 'discord.js';
 import { signalEmoji } from './signal-emojis.js';
 
 /**
@@ -44,40 +55,69 @@ function simLine(sim) {
   return `${icon} **${sim.name}** · ${parts.join(' · ')}`;
 }
 
-const HOP_SHORT = { 'camera-server': 'Cam', 'server-studio': 'Studio' };
+const HOP_SHORT = { 'camera-server': 'cam', 'server-studio': 'studio' };
 
-function hopText(hop) {
-  if (!hop) return '—';
-  if (hop.status === 'offline') return '🔴';
-  if (hop.status === 'warning') return `🟡 ${hop.bitrateMbps !== null ? `${hop.bitrateMbps.toFixed(2)} Mbps` : 'low'}`;
-  return '🟢';
+/** Stream names as compact inline-code tags, several to a line, capped to a field's 1024 chars. */
+function tagList(names) {
+  let out = '';
+  for (let i = 0; i < names.length; i++) {
+    const tag = `\`${names[i]}\``;
+    const more = ` +${names.length - i} more`;
+    if (out.length + tag.length + 1 + more.length > 1024) return `${out}${more}`;
+    out += (out ? ' ' : '') + tag;
+  }
+  return out;
 }
 
 /**
- * The MediaMTX panel (its own channel): the media-mtx site's streams, live
- * or not, and each hop's status (🟢 ok, 🟡 low bitrate, 🔴 offline).
+ * The MediaMTX panel (its own channel), grouped rather than one row per
+ * stream: going to the studio, low bitrate, live on the server, and
+ * (as small text) recently seen but offline.
+ *
+ * The site's live list is the current truth for "is it live" — the events
+ * feed only says when a hop last changed, so an old camera "offline" event
+ * on a stream that's live now is stale and ignored. Hop events only count
+ * for streams that are live.
  */
 export function buildMediamtxMessage(mtx) {
-  const live = mtx.paths.filter((p) => p.live).length;
-  const lines = [
-    `## 🟢 ${live} live stream${live === 1 ? '' : 's'}`,
-    `-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`,
-  ];
-  for (const p of mtx.paths) {
-    const hops = Object.entries(p.hops)
-      .map(([hop, status]) => `${HOP_SHORT[hop] ?? hop} ${hopText(status)}`)
-      .join(' · ');
-    lines.push(`${p.live ? '🟢' : '⚫'} **${p.path}** · ${hops}`);
+  const live = mtx.paths.filter((p) => p.live);
+  const toStudio = [];
+  const lowBitrate = [];
+  const liveOnly = [];
+  let studioCount = 0;
+  for (const p of live) {
+    const warnings = Object.entries(p.hops).filter(([, h]) => h?.status === 'warning');
+    if (warnings.length) {
+      const detail = warnings
+        .map(([hop, h]) => `${HOP_SHORT[hop] ?? hop}${h.bitrateMbps !== null ? ` ${h.bitrateMbps.toFixed(2)} Mbps` : ''}`)
+        .join(', ');
+      lowBitrate.push(`\`${p.path}\` · ${detail}`);
+    }
+    const studio = p.hops['server-studio']?.status;
+    const goingToStudio = studio === 'online' || studio === 'warning';
+    if (goingToStudio) studioCount++;
+    // A low-bitrate stream is listed once, under Low bitrate (its detail says which hop).
+    if (warnings.length) continue;
+    if (goingToStudio) toStudio.push(p.path);
+    else liveOnly.push(p.path);
   }
-  if (mtx.paths.length === 0) lines.push('-# No streams right now.');
-  if (mtx.error) lines.push(`⚠️ ${mtx.error.slice(0, 300)}`);
+  const offline = mtx.paths.filter((p) => !p.live).map((p) => p.path);
 
-  let description = lines.join('\n');
-  if (description.length > 4000) description = `${description.slice(0, 3990)}\n…`;
+  const header = [`## ${live.length} live${studioCount ? ` · ${studioCount} to studio` : ''}`];
+  header.push(`-# ${mtx.srtAddress ? `${mtx.srtAddress} · ` : ''}updated <t:${Math.floor(Date.now() / 1000)}:R>`);
+  if (mtx.error) header.push(`⚠️ ${mtx.error.slice(0, 300)}`);
+  if (mtx.paths.length === 0) header.push('No streams right now.');
+
   const embed = new EmbedBuilder()
     .setTitle('MediaMTX')
-    .setDescription(description)
-    .setColor(mtx.error ? 0xfee75c : live ? 0x57f287 : 0x4f545c);
+    .setDescription(header.join('\n'))
+    .setColor(mtx.error || lowBitrate.length ? 0xfee75c : live.length ? 0x57f287 : 0x4f545c);
+
+  if (toStudio.length) embed.addFields({ name: `📺 To studio · ${toStudio.length}`, value: tagList(toStudio) });
+  if (lowBitrate.length) embed.addFields({ name: `⚠️ Low bitrate · ${lowBitrate.length}`, value: lowBitrate.join('\n').slice(0, 1024) });
+  if (liveOnly.length) embed.addFields({ name: `🟢 Live · ${liveOnly.length}`, value: tagList(liveOnly) });
+  if (offline.length) embed.addFields({ name: `⚫ Offline · ${offline.length}`, value: `-# ${offline.join(', ')}`.slice(0, 1024) });
+
   return { content: '', embeds: [embed], components: [] };
 }
 
@@ -127,18 +167,21 @@ function buildMtxSelectRow(snap, mtx) {
   );
 }
 
+/**
+ * One unit's box, as a components-v2 container so the MediaMTX dropdown
+ * and Go Live / Stop sit inside the box (embeds can only have them below):
+ * name + status, stats, connections, then the dropdown above the button.
+ */
 export function buildUnitMessage(snap, mtx = null) {
   const style = STATE_STYLE[snap.state];
-  const embed = new EmbedBuilder()
-    .setTitle(`${style.icon} ${snap.name}`)
-    .setColor(style.color)
-    .setFooter({ text: [snap.product, snap.serial, snap.swVersion && `SW ${snap.swVersion}`].filter(Boolean).join(' · ') || snap.id });
+  const container = new ContainerBuilder().setAccentColor(style.color);
+  const text = (content) => container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
 
   const status = [`**${style.label}**`];
   if (snap.destination) status.push(snap.state === 'live' ? `to **${snap.destination}**` : `· Go Live → **${snap.destination}**`);
   const uptime = snap.state === 'live' ? formatUptime(snap.video.uptimeSec) : null;
   if (uptime) status.push(`for ${uptime}`);
-  embed.setDescription(status.join(' '));
+  text(`### ${style.icon} ${snap.name}\n${status.join(' ')}`);
 
   if (snap.state !== 'offline') {
     const input =
@@ -148,43 +191,48 @@ export function buildUnitMessage(snap, mtx = null) {
           ? `✅ ${[snap.video.resolution, snap.video.fps && `${snap.video.fps}fps`].filter(Boolean).join(' ') || 'Connected'}`
           : '—';
     const upSims = snap.sims.filter((s) => s.connected !== false).length;
-
-    embed.addFields(
-      { name: 'Bitrate', value: formatBitrate(snap.totalKbps), inline: true },
-      { name: 'Input', value: input, inline: true },
-      { name: 'SIMs', value: snap.sims.length ? `${upSims} / ${snap.sims.length} up` : '—', inline: true },
-    );
-    if (snap.battery !== null) {
-      embed.addFields({ name: 'Battery', value: `${snap.charging ? '🔌' : '🔋'} ${Math.round(snap.battery)}%`, inline: true });
-    }
+    const stats = [
+      `**Bitrate** ${formatBitrate(snap.totalKbps)}`,
+      `**Input** ${input}`,
+      `**SIMs** ${snap.sims.length ? `${upSims}/${snap.sims.length} up` : '—'}`,
+    ];
+    if (snap.battery !== null) stats.push(`**Battery** ${snap.charging ? '🔌' : '🔋'} ${Math.round(snap.battery)}%`);
+    text(stats.join('  ·  '));
 
     const links = snap.interfaces.map(simLine);
-    if (links.length) embed.addFields({ name: 'Connections', value: links.join('\n').slice(0, 1024) });
-    if (!snap.detailsOk) embed.addFields({ name: '\u200b', value: '-# Live details unavailable right now.' });
+    if (links.length) text(`**Connections**\n${links.join('\n')}`.slice(0, 2000));
+    if (!snap.detailsOk) text('-# Live details unavailable right now.');
   }
 
-  const row = new ActionRowBuilder().addComponents(
-    snap.state === 'live'
-      ? new ButtonBuilder().setCustomId(`${STOP_PREFIX}${snap.id}`).setLabel('Stop Stream').setEmoji('⏹️').setStyle(ButtonStyle.Danger)
-      : new ButtonBuilder()
-          .setCustomId(`${GO_LIVE_PREFIX}${snap.id}`)
-          .setLabel('Go Live')
-          .setEmoji('🔴')
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(snap.state === 'offline'),
-  );
+  text(`-# ${[snap.product, snap.serial, snap.swVersion && `SW ${snap.swVersion}`].filter(Boolean).join(' · ') || snap.id}`);
+  container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
 
   const mtxRow = snap.state === 'offline' ? null : buildMtxSelectRow(snap, mtx);
-  return { content: '', embeds: [embed], components: mtxRow ? [row, mtxRow] : [row] };
+  if (mtxRow) container.addActionRowComponents(mtxRow);
+  container.addActionRowComponents(
+    new ActionRowBuilder().addComponents(
+      snap.state === 'live'
+        ? new ButtonBuilder().setCustomId(`${STOP_PREFIX}${snap.id}`).setLabel('Stop Stream').setEmoji('⏹️').setStyle(ButtonStyle.Danger)
+        : new ButtonBuilder()
+            .setCustomId(`${GO_LIVE_PREFIX}${snap.id}`)
+            .setLabel('Go Live')
+            .setEmoji('🔴')
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(snap.state === 'offline'),
+    ),
+  );
+
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
-/** Comparable form of a rendered message, minus the summary's always-changing "updated" time. */
+/** Comparable form of a rendered message, minus the standing messages' always-changing "updated" time. */
 export function messageKey(payload) {
   return JSON.stringify({
-    embeds: payload.embeds.map((e) => {
+    embeds: (payload.embeds ?? []).map((e) => {
       const data = e.toJSON();
       return { ...data, description: data.description?.replace(/<t:\d+:R>/g, '') };
     }),
-    components: payload.components.map((c) => c.toJSON()),
+    components: (payload.components ?? []).map((c) => c.toJSON()),
+    flags: payload.flags ?? 0,
   });
 }

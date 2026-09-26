@@ -1,5 +1,6 @@
+import { MessageFlags } from 'discord.js';
 import * as liveu from './client.js';
-import * as mtx from '../mediamtx/client.js';
+import * as mtxClient from '../mediamtx/client.js';
 import { buildSnapshot } from './parse.js';
 import { allLiveuConfigs, lowBitrateKbps, updateLiveuConfig } from './store.js';
 import { buildMediamtxMessage, buildSummaryMessage, buildUnitMessage, formatBitrate, messageKey } from './view.js';
@@ -245,7 +246,12 @@ async function renderLiveuBoard(guildId, cfg, snapshots, error, mtx) {
   const unitMessages = { ...cfg.unitMessages };
   for (const snap of shown) {
     const payload = buildUnitMessage(snap, mtx);
-    const message = await fetchMessage(channel, unitMessages[snap.id]);
+    let message = await fetchMessage(channel, unitMessages[snap.id]);
+    // Boxes posted as classic embeds (before the components-v2 layout) can't be edited into it — replace them.
+    if (message && !message.flags?.has(MessageFlags.IsComponentsV2)) {
+      await message.delete().catch(() => {});
+      message = null;
+    }
     if (message) {
       await editIfChanged(message, payload);
     } else {
@@ -319,7 +325,7 @@ export function pollNow() {
 export function startLiveuMonitor(discordClient) {
   if (started) return;
   client = discordClient;
-  if (!liveu.isConfigured() && !mtx.isConfigured() && !mtx.eventsConfigured()) {
+  if (!liveu.isConfigured() && !mtxClient.isConfigured() && !mtxClient.eventsConfigured()) {
     console.log('Neither LiveU nor the media-mtx site is configured — studio board monitoring disabled.');
     return;
   }
