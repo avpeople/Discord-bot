@@ -109,8 +109,8 @@ function pngChunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-/** Minimal RGBA PNG encoder. */
-function encodePng(width, height, rgba) {
+/** Minimal RGBA PNG encoder (also used by liveu/signal-emojis.js). */
+export function encodePng(width, height, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);

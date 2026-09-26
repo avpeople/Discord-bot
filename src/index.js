@@ -78,6 +78,7 @@ import { initUsageBarEmojis } from './usage-bar-emojis.js';
 import { registerCommands } from './register-commands.js';
 import { handleCoolifyControl } from './coolify-controls.js';
 import { startLiveuMonitor } from './liveu/monitor.js';
+import { initSignalEmojis } from './liveu/signal-emojis.js';
 import {
   handleSetLiveuChannel,
   handleLiveuAlertBitrate,
@@ -152,6 +153,7 @@ client.once('ready', async () => {
 
   // Before the picker resync below, so the picker shows the smooth usage bars.
   await initUsageBarEmojis(client);
+  await initSignalEmojis(client);
 
   // Reset any picker channel back to the plain picker in case the bot
   // restarted mid-confirmation-window (e.g. right after someone picked a

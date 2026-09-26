@@ -223,8 +223,8 @@ Set `LIVEU_EMAIL` / `LIVEU_PASSWORD` (the LiveU Solo portal login) and the
 bot polls LiveU every 15s ([src/liveu/](src/liveu/)):
 
 - `/studio set-liveu-channel channel:#liveu-status` — posts a summary at
-  the top (🔴 2 live · 🟢 1 online · ⚫ 5 offline, offline units listed
-  by name), then one box per online unit:
+  the top (🔴 2 live · 🟢 1 online · ⚫ 5 offline), then one box per
+  online unit:
   status, total bitrate, video input, SIMs up, and each connection's
   bitrate/signal. Boxes are edited in place, only when something changed.
 - **Go Live** streams to the unit's selected destination (the box shows
