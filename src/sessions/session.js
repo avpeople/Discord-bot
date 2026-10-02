@@ -220,9 +220,16 @@ export class Session {
     // context and re-read files, which multiplies token usage.
     // --disallowedTools is the actual enforcement mechanism; --allowedTools
     // alone does NOT reliably block a tool it omits (verified against the CLI).
+    //
+    // --tools limits which built-in tool definitions are loaded into context
+    // at all. Without it the CLI sends every default tool (Skill, Cron*,
+    // NotebookEdit, Monitor, ...) on every turn whether or not it's allowed —
+    // measured against the CLI: a trivial "reply ok" code-session turn was
+    // ~43k input tokens with the default set vs ~22k with just these.
     if (this.isChat) {
       // No repo to work on, so no shell or file editing — just the web and reading attachments.
       args.push(
+        '--tools', 'Read,WebSearch,WebFetch',
         '--allowedTools', 'Read,WebSearch,WebFetch',
         '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${CHAT_SESSION_PROMPT}`,
         '--disallowedTools', 'Agent,Task,Bash,Edit,Write,NotebookEdit',
@@ -231,6 +238,7 @@ export class Session {
       const refsDir = `${this.dir}-refs`;
       fs.mkdirSync(refsDir, { recursive: true });
       args.push(
+        '--tools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
         '--allowedTools', 'Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite',
         '--append-system-prompt', `${OPTIONS_SYSTEM_PROMPT}\n\n${CODE_SESSION_PROMPT}\n\n${referenceReposPrompt(refsDir)}`,
         '--add-dir', refsDir,
