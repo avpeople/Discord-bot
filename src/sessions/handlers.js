@@ -121,6 +121,21 @@ export async function handleRepoSelected(interaction, sessionManager) {
 }
 
 /**
+ * One-line token summary for a turn's `result` event, e.g.
+ * "48k in (41k cached) / 1.2k out". "in" is everything sent to the model
+ * across all of the turn's API calls (fresh + cache writes + cache reads),
+ * so a tool-heavy turn re-counts the conversation once per call.
+ */
+function formatUsage(result) {
+  const u = result?.usage;
+  if (!u) return null;
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+  const cached = u.cache_read_input_tokens ?? 0;
+  const totalIn = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + cached;
+  return `${k(totalIn)} in (${k(cached)} cached) / ${k(u.output_tokens ?? 0)} out`;
+}
+
+/**
  * Sends `text` as the next turn in `session` and posts the reply into
  * `channel`, including Commit/Keep Going/Exit buttons, option buttons if
  * Claude's reply ended with a ```options block, or an Approve/Deny prompt
@@ -186,7 +201,12 @@ async function runTurn(session, channel, text, sessionManager, { allowBash = fal
       return;
     }
 
-    const suffix = toolCallCount > 0 ? ` _(${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'})_` : '';
+    const usage = formatUsage(result);
+    if (usage) console.log(`[session ${session.id}] turn usage: ${usage}`);
+    const suffixParts = [];
+    if (toolCallCount > 0) suffixParts.push(`${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}`);
+    if (usage) suffixParts.push(usage);
+    const suffix = suffixParts.length > 0 ? ` _(${suffixParts.join(' · ')})_` : '';
     if (options) {
       await channel.send({
         content: `Pick one:${suffix}`,

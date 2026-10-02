@@ -132,7 +132,20 @@ export class Session {
       '--permission-mode', 'acceptEdits',
       '--allowedTools', allowBash ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Edit,Write,Glob,Grep',
       '--append-system-prompt', OPTIONS_SYSTEM_PROMPT,
+      // Limits which built-in tools are loaded into context at all. Without
+      // this the CLI ships every default tool definition (Agent, WebFetch,
+      // WebSearch, TodoWrite, NotebookEdit, ...) on every single turn even
+      // though --allowedTools means none of them can be used — measured
+      // directly against the CLI: a trivial "reply ok" turn was ~43k input
+      // tokens with the default set vs ~13k with this list. Bash stays in
+      // the list (and is still removed by --disallowedTools below) so a
+      // denied attempt keeps producing the same "No such tool available:
+      // Bash" tool_result the detection code further down matches on.
+      '--tools', 'Read,Edit,Write,Glob,Grep,Bash',
     ];
+    if (config.claude.model) {
+      args.push('--model', config.claude.model);
+    }
     // --allowedTools alone does NOT reliably block a tool it omits — verified
     // directly against the CLI: with only --allowedTools set (no
     // --disallowedTools), Claude ran Bash anyway despite it being absent from

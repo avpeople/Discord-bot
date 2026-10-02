@@ -17,6 +17,7 @@ services:
       GITHUB_COMMIT_NAME: ${GITHUB_COMMIT_NAME}
       GITHUB_COMMIT_EMAIL: ${GITHUB_COMMIT_EMAIL}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CLAUDE_MODEL: ${CLAUDE_MODEL}
       CLAUDE_CONFIG_DIR: /data/claude-config
       WORKSPACE_DIR: /data/workspaces
       # Voice bridge (optional) — was missing from this file entirely before,
