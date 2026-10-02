@@ -96,6 +96,13 @@ import {
   handleLiveuInteraction,
   isLiveuInteraction,
 } from './liveu/handlers.js';
+import {
+  handleSetSiteChannel,
+  handleSiteMessage,
+  handleSiteInteraction,
+  isSiteInteraction,
+  isSiteChannel,
+} from './site/handlers.js';
 
 const client = new Client({
   // GuildVoiceStates: joining voice channels for the coms bridge, and seeing who's in them.
@@ -223,6 +230,16 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'liveu-alert-bitrate') return handleLiveuAlertBitrate(interaction);
       if (sub === 'liveu-raw') return handleLiveuRaw(interaction);
       return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'site') {
+      if (interaction.options.getSubcommand() === 'set-channel') return handleSetSiteChannel(interaction);
+      return;
+    }
+
+    // Website editor: Apply / Cancel under a proposed edit, Undo under an applied one.
+    if (interaction.isButton() && isSiteInteraction(interaction.customId)) {
+      return handleSiteInteraction(interaction);
     }
 
     if (interaction.isButton() && isRequestButton(interaction.customId)) {
@@ -364,6 +381,18 @@ client.on('interactionCreate', async (interaction) => {
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+
+  // The website editor channel has its own role check (see site/handlers.js).
+  if (isSiteChannel(message)) {
+    try {
+      await handleSiteMessage(message);
+    } catch (err) {
+      console.error('Unhandled site editor error:', err);
+      await message.reply(`❌ Something went wrong: ${err.message}`.slice(0, 2000)).catch(() => {});
+    }
+    return;
+  }
+
   if (!sessionManager.getByChannel(message.channelId)) return;
   if (!hasAccess({ member: message.member })) return;
 

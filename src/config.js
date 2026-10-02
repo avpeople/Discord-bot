@@ -58,6 +58,18 @@ export const config = {
     port: Number(process.env.NOTIFY_PORT) || 8790,
     apiKey: process.env.NOTIFY_API_KEY || null,
   },
+  // Optional: the avp.nz site's content API (see src/site/). Staff type
+  // edits in the /site set-channel channel and the bot changes the site's
+  // text and photos through this API — no commit or redeploy. Disabled
+  // unless both are set. The key is the site's CONTENT_API_KEY.
+  site: {
+    url: process.env.SITE_CONTENT_URL || null,
+    apiKey: process.env.SITE_CONTENT_API_KEY || null,
+    // Who may edit the site. Falls back to ALLOWED_ROLE_ID.
+    roleId: process.env.SITE_EDITOR_ROLE_ID || process.env.ALLOWED_ROLE_ID,
+    model: process.env.SITE_EDITOR_MODEL || 'sonnet',
+  },
+  siteStatePath: process.env.SITE_STATE_PATH || '/data/claude-config/discord-site.json',
   // Optional: LiveU Solo account the studio LiveU board and alerts read
   // from (see src/liveu/). Disabled entirely if unset. Go Live / Stop
   // need LIVEU_ROLE_ID, falling back to ALLOWED_ROLE_ID.

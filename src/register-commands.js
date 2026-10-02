@@ -208,6 +208,22 @@ const commands = [
         ),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName('site')
+    .setDescription('Website editor: change text and photos on the site from Discord')
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-channel')
+        .setDescription('Make a channel the website editor (staff type edits there)')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The channel for website edits')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
+    .toJSON(),
 ];
 
 /**

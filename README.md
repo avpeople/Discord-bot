@@ -184,6 +184,30 @@ does nothing rather than ever failing the real action it's logging.
 Config is per-guild, persisted the same way as the picker channel and
 welcome panel config.
 
+## Website editor (optional)
+
+`/site set-channel channel:#website` (requires **Manage Channels**) makes a
+channel where staff change the avp.nz site's text and photos by typing what
+they want ("change Friday's hours to 8:30am – 4pm", or a photo with "use
+this for Dylan"). Changes go through the site's content API
+([src/site/client.js](src/site/client.js)), so they're live on the next
+page load with no commit or deploy.
+
+- Editors can only touch the site's fixed list of named fields — text and
+  images. Layout, links and code aren't reachable from here.
+- Each request is one Claude call with no tools: it's given the field list
+  and replies with which fields to set ([src/site/editor.js](src/site/editor.js)).
+  The bot checks that against the field list and shows a before/after
+  preview; nothing changes until someone presses **Apply to site**.
+- **Undo** under an applied change puts those fields back. Pending
+  proposals and undo data are in memory, so they expire on a bot restart.
+- Photos must be JPEG, PNG or WebP up to 10 MB, and are stored as sent
+  (not resized).
+
+Set `SITE_CONTENT_URL` and `SITE_CONTENT_API_KEY` (the site's
+`CONTENT_API_KEY`); `SITE_EDITOR_ROLE_ID` picks who may edit, falling back
+to `ALLOWED_ROLE_ID`. If the Activity log is set, each update is logged there.
+
 ## Studio monitoring (optional)
 
 `/studio set-log-channel channel:#studio-events` (requires **Manage
