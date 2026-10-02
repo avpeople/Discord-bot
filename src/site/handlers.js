@@ -2,7 +2,8 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, Permissions
 import { config } from '../config.js';
 import { chunkMessage, formatTurnStats } from '../sessions/reply.js';
 import { logEvent } from '../log-channel.js';
-import { isConfigured, listFields, setText, setImage, resetField, downloadImage } from './client.js';
+import { isConfigured, listFields } from './client.js';
+import { applyEdit, runUndo } from './apply.js';
 import { proposeEdits } from './editor.js';
 import { validateEdits, describeEdit } from './edits.js';
 import { getSiteChannelId, setSiteChannelId } from './store.js';
@@ -197,22 +198,11 @@ export async function handleSiteMessage(message) {
   }
 }
 
-/**
- * How to put a field back the way it was when the proposal was made, worked
- * out before the edit is applied. Null if that isn't possible (the previous
- * photo couldn't be downloaded — the site deletes it once replaced).
- */
-async function undoStepFor(field) {
-  if (!field.edited) return { key: field.key, kind: 'reset' };
-  if (field.type === 'text') return { key: field.key, kind: 'text', value: field.value };
-  const buffer = await downloadImage(field.value).catch(() => null);
-  return buffer ? { key: field.key, kind: 'image', buffer } : null;
-}
+const LIST_ACTIONS = { add: 'item added', update: 'item changed', remove: 'item removed' };
 
-async function runStep(step) {
-  if (step.kind === 'text') await setText(step.key, step.value);
-  else if (step.kind === 'image') await setImage(step.key, step.buffer);
-  else await resetField(step.key);
+/** One line for the "updated the site" summary and the activity log. */
+function appliedLabel(edit) {
+  return LIST_ACTIONS[edit.kind] ? `${edit.field.label} (${LIST_ACTIONS[edit.kind]})` : edit.field.label;
 }
 
 async function handleApply(interaction) {
@@ -230,13 +220,8 @@ async function handleApply(interaction) {
   for (const edit of entry.edits) {
     const { field } = edit;
     try {
-      const undoStep = await undoStepFor(field);
-      await runStep(
-        edit.kind === 'image'
-          ? { key: field.key, kind: 'image', buffer: entry.images[edit.imageIndex].buffer }
-          : { key: field.key, kind: edit.kind, value: edit.value },
-      );
-      applied.push(field.label);
+      const undoStep = await applyEdit(edit, entry.images);
+      applied.push(appliedLabel(edit));
       if (undoStep) undoSteps.push(undoStep);
     } catch (err) {
       failed.push(`**${field.label}**: ${err.message}`);
@@ -249,7 +234,13 @@ async function handleApply(interaction) {
     lines.push(...applied.map((label) => `-# • ${label}`));
   }
   if (failed.length > 0) lines.push(`❌ ${plural(failed.length, 'change')} didn't go through:`, ...failed.map((f) => `-# • ${f}`));
-  if (applied.length > undoSteps.length) lines.push("-# A replaced photo couldn't be saved first, so Undo won't bring it back.");
+  if (applied.length > undoSteps.length) {
+    lines.push(
+      undoSteps.length > 0
+        ? "-# Undo won't cover everything here: a list reset, or a photo that couldn't be saved first, can't be brought back."
+        : "-# This can't be undone from here.",
+    );
+  }
 
   if (undoSteps.length > 0) rememberCapped(undoByMessage, interaction.message.id, undoSteps);
   await interaction.editReply({
@@ -279,9 +270,9 @@ async function handleUndo(interaction) {
   await interaction.update({ components: [] });
 
   const failed = [];
-  // Newest first, so a field changed twice in one go ends up at its oldest value.
+  // Newest first, so list items go back into the positions they came from.
   for (const step of [...steps].reverse()) {
-    await runStep(step).catch((err) => failed.push(`\`${step.key}\`: ${err.message}`));
+    await runUndo(step).catch((err) => failed.push(`\`${step.key}\`: ${err.message}`));
   }
   remember(interaction.channelId, 'assistant', '(The person undid those changes; the site is back as it was before them.)');
   await interaction.followUp({

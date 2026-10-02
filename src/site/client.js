@@ -53,3 +53,27 @@ export async function downloadImage(value) {
   if (!res.ok) throw new Error(`the site returned ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
+
+// ---- Lists (testimonials, team members, gallery, FAQs): items can be added, changed, moved and removed.
+
+const itemPath = (key, id, suffix = '') => `${fieldPath(key)}/items/${encodeURIComponent(id)}${suffix}`;
+const json = (body) => ({ body: JSON.stringify(body), contentType: 'application/json' });
+
+/** Adds an item with these text parts (`position` counts from 1; omitted = last). Returns the new item, with its id. */
+export async function addItem(key, { values, position }) {
+  return (await request('POST', `${fieldPath(key)}/items`, json({ values, position }))).item;
+}
+
+/** Changes an item's text parts and/or moves it. Either is optional. */
+export async function updateItem(key, id, { values, position }) {
+  return (await request('PUT', itemPath(key, id), json({ values, position }))).item;
+}
+
+/** Sets one image part (e.g. `photo`) of a list item. */
+export async function setItemImage(key, id, part, buffer) {
+  return (await request('POST', itemPath(key, id, `/${encodeURIComponent(part)}/image`), { body: buffer, contentType: 'application/octet-stream' })).item;
+}
+
+export async function removeItem(key, id) {
+  await request('DELETE', itemPath(key, id));
+}

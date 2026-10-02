@@ -193,13 +193,16 @@ this for Dylan"). Changes go through the site's content API
 ([src/site/client.js](src/site/client.js)), so they're live on the next
 page load with no commit or deploy.
 
-- Editors can only touch the site's fixed list of named fields — text and
-  images. Layout, links and code aren't reachable from here.
+- Editors can only touch the site's fixed set of named fields — text and
+  images — and its lists (testimonials, team members, gallery photos,
+  FAQs), whose items can be added, changed, reordered and removed. Layout,
+  links and code aren't reachable from here.
 - Each request is one Claude call with no tools: it's given the field list
   and replies with which fields to set ([src/site/editor.js](src/site/editor.js)).
   The bot checks that against the field list and shows a before/after
   preview; nothing changes until someone presses **Apply to site**.
-- **Undo** under an applied change puts those fields back. Pending
+- **Undo** under an applied change puts those fields back (a whole-list
+  reset can't be undone; [src/site/apply.js](src/site/apply.js)). Pending
   proposals and undo data are in memory, so they expire on a bot restart.
 - Photos must be JPEG, PNG or WebP up to 10 MB, and are stored as sent
   (not resized).
