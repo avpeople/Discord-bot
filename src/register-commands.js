@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { pathToFileURL } from 'node:url';
 import { REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
 
 const commands = [
@@ -11,9 +12,37 @@ const commands = [
         .setDescription('Start a new Claude Code session: pick a repo, get a private channel to chat in'),
     )
     .addSubcommand((sub) =>
+      sub.setName('chat').setDescription('Start a plain chat with Claude in a private channel (no repo)'),
+    )
+    .addSubcommand((sub) =>
       sub
         .setName('close')
         .setDescription('Close this session: push if needed, open a PR, and remove this channel'),
+    )
+    .addSubcommand((sub) =>
+      sub.setName('status').setDescription('List all open sessions: repo, owner, idle time, model and cost so far'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('init')
+        .setDescription("Have Claude write CLAUDE.md project notes for this session's repo (saves tokens later)"),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('model')
+        .setDescription("Switch this session's Claude model (Sonnet is much cheaper than Opus)")
+        .addStringOption((opt) =>
+          opt
+            .setName('model')
+            .setDescription('Which model to use from the next message on')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Sonnet — fast and cheaper, good for most tasks', value: 'sonnet' },
+              { name: 'Opus — most capable, most expensive', value: 'opus' },
+              { name: 'Haiku — fastest and cheapest, simple tasks', value: 'haiku' },
+              { name: 'Default — the bot/account default', value: 'default' },
+            ),
+        ),
     )
     .addSubcommand((sub) =>
       sub
@@ -25,10 +54,26 @@ const commands = [
     )
     .addSubcommand((sub) =>
       sub
+        .setName('set-chat-channel')
+        .setDescription('Post a permanent "Chat with Claude" button in a channel')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to post the button in').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('set-log-channel')
         .setDescription('Set where session activity (opened, committed, closed, etc.) gets logged')
         .addChannelOption((opt) =>
           opt.setName('channel').setDescription('The channel to log activity to').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-coolify-log-channel')
+        .setDescription('Set where every Coolify deployment on the server gets logged')
+        .addChannelOption((opt) =>
+          opt.setName('channel').setDescription('The channel to log deployments to').setRequired(true),
         ),
     )
     .toJSON(),
@@ -75,50 +120,40 @@ const commands = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName('voice')
-    .setDescription('Bridge a Discord voice channel to a LiveKit channel (Coms server)')
+    .setDescription('Listen and talk on coms from a Discord voice channel')
     .addSubcommand((sub) =>
       sub
         .setName('join')
-        .setDescription('Bridge a voice channel to a LiveKit channel')
-        .addStringOption((opt) =>
-          opt.setName('room').setDescription('The LiveKit channel id to bridge to').setRequired(true),
-        )
+        .setDescription('Bridge a voice channel to a coms channel (listen always, talk with the panel button)')
         .addChannelOption((opt) =>
           opt
             .setName('channel')
             .setDescription('The Discord voice channel to bridge')
             .setRequired(true)
             .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+        )
+        .addStringOption((opt) =>
+          opt.setName('coms').setDescription('The coms channel').setRequired(true).setAutocomplete(true),
         ),
     )
     .addSubcommand((sub) =>
       sub
-        .setName('leave')
-        .setDescription('Disconnect a voice channel from its LiveKit bridge')
+        .setName('set-coms-channel')
+        .setDescription('Post the coms landing page: pick a coms channel to open a voice chat for it')
         .addChannelOption((opt) =>
           opt
             .setName('channel')
-            .setDescription('The bridged Discord voice channel')
+            .setDescription('Text channel for the landing page (voice chats open in its category)')
             .setRequired(true)
-            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+            .addChannelTypes(ChannelType.GuildText),
         ),
     )
-    .addSubcommand((sub) =>
-      sub
-        .setName('status')
-        .setDescription('Check whether a voice channel is currently bridged')
-        .addChannelOption((opt) =>
-          opt
-            .setName('channel')
-            .setDescription('The Discord voice channel to check')
-            .setRequired(true)
-            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
-        ),
-    )
+    .addSubcommand((sub) => sub.setName('leave').setDescription('Stop the coms bridge'))
+    .addSubcommand((sub) => sub.setName('status').setDescription("Show what the coms bridge is doing"))
     .toJSON(),
   new SlashCommandBuilder()
     .setName('studio')
-    .setDescription('Studio monitoring (GFX site logins, and future studio systems)')
+    .setDescription('Studio monitoring: LiveU status board, alerts and the studio log')
     .addSubcommand((sub) =>
       sub
         .setName('set-log-channel')
@@ -127,12 +162,62 @@ const commands = [
           opt.setName('channel').setDescription('The channel to log studio events to').setRequired(true),
         ),
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-liveu-channel')
+        .setDescription('Make a channel the live LiveU status board (posts it there now)')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The channel for the LiveU status board')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set-mediamtx-channel')
+        .setDescription('Give the MediaMTX stream panel its own channel (posts it there now)')
+        .addChannelOption((opt) =>
+          opt
+            .setName('channel')
+            .setDescription('The channel for the MediaMTX panel')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildText),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('liveu-alert-bitrate')
+        .setDescription('Log to the studio log when a live LiveU drops under this bitrate')
+        .addIntegerOption((opt) =>
+          opt
+            .setName('kbps')
+            .setDescription('Threshold in kbps (default 1500). 0 turns the alert off.')
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(100000),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('liveu-raw')
+        .setDescription("Download a LiveU unit's raw API data (for fixing wrong-looking stats)")
+        .addStringOption((opt) =>
+          opt.setName('unit').setDescription('Unit name or serial').setRequired(true),
+        ),
+    )
     .toJSON(),
 ];
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
-async function main() {
+/**
+ * Registers (overwrites) the bot's slash commands with Discord. index.js
+ * calls this on every boot, so new/changed commands go live with each
+ * deploy; `npm run register` still runs it by hand. A bulk overwrite is
+ * idempotent, so re-sending an unchanged list is harmless.
+ */
+export async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   const clientId = process.env.DISCORD_CLIENT_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
 
@@ -145,7 +230,10 @@ async function main() {
   console.log('Done.');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run directly (`npm run register`) — not when imported by index.js.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  registerCommands().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import simpleGit from 'simple-git';
+import { config } from '../config.js';
 import {
   prepareRepo,
   commitAndPush,
   discardPendingChanges,
   cleanupRepoDir,
   rebranchFromDefault,
+  isWorkingTreeClean,
 } from '../repo.js';
-import { openPullRequest, mergePullRequest, deleteBranch } from '../github.js';
+import { openPullRequest, mergePullRequest, deleteBranch, openRevertPullRequest } from '../github.js';
 import { Session } from './session.js';
+import { writePullRequestSummary } from './pr-writer.js';
 import { loadSessionsState, saveSessionsState } from './store.js';
 import { cleanupUploadsDir } from './attachments.js';
 import { logEvent } from '../log-channel.js';
@@ -45,7 +49,7 @@ export class SessionManager {
         anyDropped = true;
         continue;
       }
-      const git = simpleGit(data.dir);
+      const git = data.kind === 'chat' ? null : simpleGit(data.dir);
       const session = new Session({ ...data, git });
       this._wire(session);
       this.sessionsByChannel.set(session.channelId, session);
@@ -57,6 +61,7 @@ export class SessionManager {
 
   _wire(session) {
     session._onIdleExpire = (s) => this._handleIdleExpire(s);
+    session._onIdleWarning = (s) => this.onIdleWarning?.(s);
     session._onChange = () => this._persist();
   }
 
@@ -66,6 +71,10 @@ export class SessionManager {
 
   getByChannel(channelId) {
     return this.sessionsByChannel.get(channelId);
+  }
+
+  listSessions() {
+    return Array.from(this.sessionsByChannel.values());
   }
 
   generateSessionId() {
@@ -103,6 +112,35 @@ export class SessionManager {
     return session;
   }
 
+  /**
+   * A plain Claude chat with no repo behind it. Claude still needs a working
+   * directory, so it gets an empty scratch folder (removed on close).
+   */
+  async createChatSession({ id: providedId, channelId, guildId, ownerId }) {
+    const id = providedId || crypto.randomUUID().slice(0, 8);
+    const dir = path.join(config.workspaceDir, '_chats', id);
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    const session = new Session({
+      id,
+      kind: 'chat',
+      channelId,
+      guildId,
+      ownerId,
+      owner: null,
+      repo: null,
+      dir,
+      git: null,
+      branchName: null,
+      defaultBranch: null,
+    });
+    this._wire(session);
+
+    this.sessionsByChannel.set(channelId, session);
+    this._persist();
+    return session;
+  }
+
   /** Sends a chat message into the session, resuming its Claude conversation. */
   async sendMessage(session, text, opts) {
     return session.sendMessage(text, opts);
@@ -121,19 +159,26 @@ export class SessionManager {
    * merged.
    */
   async commitAndMerge(session, message) {
-    const commitMessage = message || `Claude Code session ${session.id}`;
+    // A descriptive title/summary written by Claude from the diff (see
+    // pr-writer.js); falls back to the generic title if that fails.
+    const summary = message ? null : await writePullRequestSummary(session).catch(() => null);
+    if (summary?.costUsd) {
+      session.totalCostUsd += summary.costUsd;
+    }
+    const commitMessage = message || summary?.title || `Claude Code session ${session.id}`;
     const { pushed } = await commitAndPush(session.git, session.branchName, commitMessage);
     if (!pushed) return null;
 
     session.hasPushedAnything = true;
 
+    const footer = `Pushed live from an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``;
     const pr = await openPullRequest({
       owner: session.owner,
       repo: session.repo,
       base: session.defaultBranch,
       head: session.branchName,
       title: commitMessage,
-      body: `Committed via an interactive Claude Code Discord session.\n\nBranch: \`${session.branchName}\``,
+      body: summary?.body ? `${summary.body}\n\n---\n${footer}` : footer,
     });
 
     const merged = await mergePullRequest({
@@ -144,13 +189,39 @@ export class SessionManager {
 
     await deleteBranch({ owner: session.owner, repo: session.repo, branch: session.branchName });
 
+    session.undoSnapshot = null; // relative to the old branch — restoring it now would fight the merge
+    await this._rebranch(session);
+    return { pr, merged };
+  }
+
+  /** Moves the session onto a fresh branch off the (freshly pulled) default branch. */
+  async _rebranch(session) {
     session.commitCount += 1;
     const nextBranch = `claude/session-${session.id}-${session.commitCount}`;
     await rebranchFromDefault(session.git, session.defaultBranch, nextBranch);
     session.branchName = nextBranch;
     this._persist();
+  }
 
-    return { pr, merged };
+  /**
+   * Reverts a PR this session merged: opens GitHub's revert PR, merges it
+   * and deletes its branch. If the session has no uncommitted work, its
+   * checkout is then moved onto the updated default branch so Claude sees
+   * the reverted code; otherwise it's left alone (returned as
+   * `synced: false`) so nothing is lost.
+   */
+  async revertMergedPullRequest(session, pullNumber) {
+    const revertPr = await openRevertPullRequest({ owner: session.owner, repo: session.repo, pullNumber });
+    const merged = await mergePullRequest({ owner: session.owner, repo: session.repo, pullNumber: revertPr.number });
+    await deleteBranch({ owner: session.owner, repo: session.repo, branch: revertPr.headRefName });
+
+    let synced = false;
+    if (await isWorkingTreeClean(session.git)) {
+      session.undoSnapshot = null;
+      await this._rebranch(session);
+      synced = true;
+    }
+    return { revertPr, merged, synced };
   }
 
   /**
@@ -165,22 +236,28 @@ export class SessionManager {
     this._persist();
     await cleanupRepoDir(session.dir);
     await cleanupUploadsDir(session.dir);
+    await fs.promises.rm(`${session.dir}-refs`, { recursive: true, force: true }); // see session.js referenceReposPrompt
 
     const labels = {
       exit: '🔴 Session closed (exit)',
       push: '🔴 Session closed (pushed first)',
       idle: '⏱️ Session auto-closed (4h idle timeout)',
     };
-    logEvent(session.guildId, `${labels[reason] ?? labels.exit} on **${session.owner}/${session.repo}**`);
+    logEvent(
+      session.guildId,
+      `${labels[reason] ?? labels.exit} on **${session.label}** — total cost ~$${session.totalCostUsd.toFixed(2)}`,
+    );
   }
 
   async _handleIdleExpire(session) {
     // Idle timeout: discard anything not already committed+merged (Commit
     // merges immediately now, so there's never a dangling PR to open here),
-    // then close as normal.
-    await discardPendingChanges(session.git).catch((err) => {
-      console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
-    });
+    // then close as normal. Chats have no repo, so nothing to discard.
+    if (!session.isChat) {
+      await discardPendingChanges(session.git).catch((err) => {
+        console.error(`[session ${session.id}] failed to discard pending changes on idle expiry:`, err);
+      });
+    }
     await this.close(session, 'idle');
     this.onIdleExpire?.(session);
   }

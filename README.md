@@ -28,11 +28,20 @@ trust to make that call.
    conversation, so it feels continuous. (A single long-running `claude`
    process fed over stdin does **not** behave like a chat REPL — verified
    directly against the CLI — so this per-message-resume approach is what
-   actually works.) Attach an image (e.g. a screenshot of a bug) and it's
-   downloaded to a folder *outside* the repo checkout — never committed —
+   actually works.) Attach an image (e.g. a screenshot of a bug), a
+   text/log/code file or a PDF and it's downloaded to a folder *outside* the repo checkout — never committed —
    and referenced by path in the prompt so Claude can read it
    ([src/sessions/attachments.js](src/sessions/attachments.js)).
-4. After each reply, **Commit** / **Keep Going** / **Exit** buttons appear:
+   While Claude works, the "Thinking..." message updates live with what
+   it's doing (reading a file, running a command, ...) and has a **Stop**
+   button that kills the turn (file changes so far are kept). Messages
+   sent while it's busy are queued and sent together as one follow-up
+   turn. Each reply ends with a stats line — tool calls, tokens, and
+   Claude Code's reported cost for that turn plus the session total (an
+   estimate on subscription logins); the log channel gets the session
+   total on close.
+4. After each reply, **Commit** / **Keep Going** / **Show Changes** /
+   **Fresh Start** / **Exit** buttons appear:
    - **Commit** commits everything changed since the last commit, opens a
      PR, and immediately merges it (squash) into the repo's default
      branch. The session then re-branches off the freshly-updated default
@@ -41,6 +50,19 @@ trust to make that call.
      Clicking it collapses that message's row to a disabled "Committed ✓".
    - **Keep Going** just collapses that message's row to "Kept Going ✓";
      changes stay uncommitted.
+   - **Show Changes** privately lists the files Commit would include,
+     with the full diff attached as `changes.diff`.
+   - **Fresh Start** clears Claude's conversation history (files are
+     kept). Every message resends the whole conversation, so long chats
+     get steadily more expensive — this resets that.
+   - **↩️ Undo This Reply's Changes** (a second row, only under replies
+     that changed files) puts the files back exactly as they were before
+     that reply — edits reverted, new files removed, deleted files
+     restored; ignored files like `node_modules` are left alone. Only the
+     latest such reply can be undone, and not after a Commit. The bot
+     snapshots the working tree into a scratch git index before each turn
+     (`snapshotWorkingTree` in [src/repo.js](src/repo.js)), and tells
+     Claude on the next message that its changes were undone.
    - **Exit** closes the session (discarding anything not already
      committed) and removes the channel. Unlike Commit/Keep Going, Exit
      stays live on every past reply — not just the newest — so you can
@@ -54,17 +76,27 @@ trust to make that call.
    distinct questions to ask, it's instructed to ask them one at a time
    rather than listing them all in one reply — see `OPTIONS_SYSTEM_PROMPT`
    in [src/sessions/session.js](src/sessions/session.js).
-6. Bash is blocked by default (see "Tool permissions" below) — if Claude
-   wants to run something that needs it, the bot shows an **Approve** /
-   **Deny** prompt with what it wanted to run instead of just letting the
-   turn fail silently. Approve re-sends the same message with Bash allowed
-   for that one attempt; Deny leaves Claude's "I can't do that" as the
-   final answer.
+6. Claude can run shell commands (Bash) without asking — see "Tool
+   permissions" below.
 7. `/code close` (run inside the session channel) asks **Push** (commit
    anything pending the same way Commit does, then close) or **Exit**
    (close without committing — pending changes are discarded).
 8. Idle 4 hours with no messages → pending changes are discarded and the
-   session auto-closes, same as Exit.
+   session auto-closes, same as Exit. A warning with a **Keep Alive**
+   button is posted 15 minutes before.
+9. After Commit merges, the message has a **⏪ Revert This Merge**
+   button: after a confirm, it opens GitHub's revert PR for that merge and
+   merges it. If Coolify is configured (see below), the bot also follows
+   the deploy each merge triggers and posts its progress and result —
+   with the last log lines if it failed.
+10. `/code status` lists every open session (repo, owner, idle time,
+   model, cost so far). `/code init` has Claude write a `CLAUDE.md` of
+   project notes for the repo — Claude Code reads it at the start of
+   every session instead of re-exploring the project; the welcome message
+   suggests it when a repo doesn't have one.
+11. `/code model` switches the session between Sonnet, Opus and Haiku
+   (Sonnet is much cheaper than Opus). `CLAUDE_MODEL` in `.env` sets the
+   default for new sessions.
 
 Session state (channel ↔ repo ↔ branch ↔ Claude conversation id) is
 persisted to disk on the `claude-config` volume, so sessions survive a
@@ -78,17 +110,62 @@ designates a channel that always shows the repo picker — open it and
 there's just a dropdown waiting, no need to run `/code new` each time.
 
 - Picking a repo there works the same as `/code new` (same access check,
-  same session creation), but the confirmation — who started a session and
-  a link to it — replaces the picker message for ~10 seconds, then it
-  reverts back to the plain picker automatically
+  same session creation). The picker stays put; the confirmation — who
+  started a session and a link to it — is posted underneath it and deleted
+  after ~10 seconds
   ([src/sessions/picker-channel-handlers.js](src/sessions/picker-channel-handlers.js)).
+  The Chat with Claude button there does the same.
 - Anyone with `ALLOWED_ROLE_ID` can use it, same as the ephemeral picker.
 - The channel/message ids are persisted (same pattern as session state),
-  and the bot re-syncs the message back to the plain picker on boot in
-  case it restarted mid-confirmation-window.
+  and the bot re-renders the picker message on boot so it picks up any
+  changes from the deploy.
 - Only one picker channel per server. Running the command again in a
   different channel moves it there; the old channel keeps whatever its
   last message was (nothing un-sets it automatically).
+- The picker (both this one and `/code new`'s) shows the Claude account's
+  usage above the dropdown: a 5-hour session bar and a weekly bar with
+  their reset times, like Claude Code's `/usage`. The picker channel's
+  message refreshes every 3 minutes
+  ([src/claude-usage.js](src/claude-usage.js)). It reads the `claude login`
+  credentials and an undocumented Claude Code endpoint, so it's hidden
+  with an API key login and may break if Anthropic changes that endpoint.
+  The bot never refreshes the login token itself, so while no session has
+  run for a few hours the last known numbers are shown, marked as such.
+
+## Deploy updates from Coolify (optional)
+
+Set `COOLIFY_URL` and `COOLIFY_API_TOKEN` (create the token in Coolify
+under **Keys & Tokens → API tokens**; read access is enough). After a
+Commit, Push-then-close or Revert merges, the bot finds the Coolify
+app(s) deploying that repo's default branch (matching `git_repository` +
+`git_branch`), follows the deploy triggered by the merge, and edits a
+message in the session channel as it goes: queued → building → ✅
+deployed / ❌ failed (with the log tail). Results also go to the activity
+log. It gives up if no deploy starts within 3 minutes (auto-deploy off)
+or it runs past 30. From inside a Coolify-deployed container
+`http://coolify:8080` usually reaches Coolify; otherwise use the
+dashboard's URL. See [src/coolify.js](src/coolify.js).
+
+**Deployment log.** `/code set-coolify-log-channel channel:#coolify-logs`
+makes the bot post every deployment on the Coolify server there —
+whatever started it (Push Live, a GitHub push, the dashboard, the
+Redeploy button). One message per deployment, edited as it goes: 🔨
+deploying → ✅ deployed (with how long it took) / ❌ failed (with the log
+tail) / ⚪ cancelled. It polls every 20 seconds and doesn't re-post history
+after a restart ([src/coolify-monitor.js](src/coolify-monitor.js)).
+
+**Server Status controls.** Under Server Status, the *Manage an app*
+dropdown opens that app privately with **📜 Logs** (last 30 lines),
+**🔄 Restart**, **🚀 Redeploy** and **⏹️ Stop** / **▶️ Start**, each behind
+a confirm step; the bot then follows the resulting Coolify deployment in
+the same message ([src/coolify-controls.js](src/coolify-controls.js)).
+These need the Coolify API token to have **write** and **deploy**
+permissions (read is enough for status and logs).
+
+**PR titles.** Push Live's PR title and description are written by
+Claude (Haiku) from the diff
+([src/sessions/pr-writer.js](src/sessions/pr-writer.js)), falling back to
+a generic title if that fails.
 
 ## Activity log (optional)
 
@@ -100,8 +177,6 @@ makes the bot post one line per significant event to that channel:
   Push-then-close
 - 🔴 a session is closed (exit or push-then-close) / ⏱️ auto-closed by the
   4-hour idle timeout
-- 🔓 / 🚫 a Bash request is approved or denied
-- 🔊 / 🔇 a voice bridge is started or stopped (`/voice join` / `/voice leave`)
 
 Logging is best-effort ([src/log-channel.js](src/log-channel.js)) — if no
 log channel is set, or the bot can't reach it for any reason, it silently
@@ -140,6 +215,59 @@ same way — that's why `kind` exists, so future sources don't need new
 storage/command plumbing on this side, just `/studio set-log-channel`
 (or a new command, if a source ever wants its own channel rather than
 sharing the `studio` one).
+
+### LiveU status board
+
+Set `LIVEU_EMAIL` / `LIVEU_PASSWORD` (the LiveU Solo portal login) and the
+bot polls LiveU every 15s ([src/liveu/](src/liveu/)):
+
+- `/studio set-liveu-channel channel:#liveu-status` — posts a summary at
+  the top (🔴 2 live · 🟢 1 online · ⚫ 5 offline), then one box per
+  online unit:
+  status, total bitrate, video input, SIMs up, and each connection's
+  bitrate/signal. Boxes are edited in place, only when something changed.
+- **Go Live** streams to the unit's selected destination (the box shows
+  which) and **Stop** ends it — same API calls as the Studio Patch app,
+  each with a confirm step. Needs `LIVEU_ROLE_ID` (else `ALLOWED_ROLE_ID`).
+  Both presses are logged to the studio log.
+- The studio log (`/studio set-log-channel`) gets: unit online/offline,
+  went live/stopped, video input lost/back, SIM lost/connected, and
+  bitrate under the threshold for 2 polls in a row / recovered.
+  `/studio liveu-alert-bitrate kbps:1500` sets the threshold (0 = off).
+- `/studio liveu-raw unit:<name>` downloads the unit's raw API responses.
+  These LiveU endpoints are the Solo portal's private ones, not a
+  documented API. Field names follow what the Studio Patch app reads,
+  with fallbacks in [src/liveu/parse.js](src/liveu/parse.js) — if a stat
+  shows `—` or looks wrong, compare against the raw dump and add the real
+  field name there.
+
+### MediaMTX
+
+With the AVP media-mtx site configured ([src/mediamtx/](src/mediamtx/),
+same endpoints as the Rugby GFX site and Studio Patch):
+
+- `/studio set-mediamtx-channel channel:#mediamtx` — a panel in its own
+  channel: each stream, live or not, with its Cam → server and server →
+  studio status (🟢 ok, 🟡 low bitrate with the Mbps, 🔴 offline).
+- `MEDIAMTX_URL` / `MEDIAMTX_USERNAME` / `MEDIAMTX_PASSWORD` — the stream
+  list for that panel, and each LiveU box gets a **Set destination
+  → MediaMTX stream** dropdown (live streams first, plus **Other…** to
+  type a name). Picking one creates an SRT destination
+  `<srtAddress>?streamid=publish:<stream>` and selects it on the unit, so
+  the next Go Live streams there. Disabled while the unit is live. Each
+  pick adds a destination to the LiveU account, like Studio Patch does.
+- `MEDIAMTX_EVENTS_API_KEY` (created on the site's Events page) — stream
+  online/offline and low-bitrate/recovered events go to the studio log,
+  and the panel's IN (camera → server) and OUT (server → studio) come
+  from these.
+- `MEDIAMTX_API_URL` (+ `MEDIAMTX_API_USER` / `MEDIAMTX_API_PASSWORD`) —
+  optional, MediaMTX's own API (e.g. `http://host:9997`). When set, IN/OUT
+  come from it instead and cover every connection (OUT shows how many are
+  pulling — a laptop counts, not just the studio), and every stream gets a
+  measured bitrate. MediaMTX needs `api: yes` and an `apiAddress` the bot
+  can reach.
+
+Panel dots: 🟢 in and out, 🟡 one of them, ⚫ neither.
 
 ## Welcome panel (role requests)
 
@@ -208,8 +336,9 @@ same variables in Coolify's environment settings.
 
 ## 4. Register slash commands
 
-Run once (locally, or via a shell into the deployed container) whenever
-the command definitions change:
+Automatic: the bot registers its commands every time it starts, so a
+redeploy is enough when the command definitions change. To do it by hand
+anyway (locally, or via a shell into the deployed container):
 
 ```bash
 npm install
@@ -253,75 +382,67 @@ If you'd rather not deal with re-authenticating on a headless server, set
 `ANTHROPIC_API_KEY` instead (API billing, no login step needed) — the bot
 picks it up automatically and skips subscription auth.
 
-## Voice bridge (Discord ↔ LiveKit, optional)
+## Coms bridge (`/voice`, optional)
 
-`/voice join room:<liveKitChannelId> channel:#voice` bridges a Discord
-voice channel to a LiveKit channel two-way, via a separate service —
-`bridge-discord`, in the Coms server repo (`bridge-discord/README.md`
-there is the authoritative reference for how it works and its exact
-control API). This bot's [src/voice/](src/voice) is just a thin client
-that tells that service to start/stop a pairing; it does no audio work
-itself.
+Listen and talk on AVP coms from a Discord voice channel. The bot does the
+audio itself ([src/coms/](src/coms/)): it joins the Discord voice channel
+and the coms channel's LiveKit room, and mixes audio both ways.
 
-- `/voice join room:<id> channel:#voice` — starts a pairing, keyed by the
-  Discord voice channel's id (so joining the same channel twice targets
-  the same pairing rather than creating a duplicate).
-- `/voice leave channel:#voice` — stops it.
-- `/voice status channel:#voice` — checks whether a channel is currently
-  bridged and each side's connection state.
+- **Setup**: in the coms admin console, Bridges tab, create a bridge (e.g.
+  "Discord") and copy its key. Set `COMS_API_URL` (the coms API, e.g.
+  `https://api-com.avp.nz`) and `COMS_BRIDGE_KEY`. The bot then shows as
+  an online bridge in the admin console.
+- `/voice set-coms-channel channel:#coms` (Manage Channels) — posts the
+  **coms landing page** there, the whole coms experience in one message.
+  Picking a coms channel from its dropdown creates a voice chat
+  **🎧 <coms channel>** in the landing channel's category (e.g. Studio) and
+  bridges it — the panel itself shows "Opening..." and then the open
+  bridge: who's on coms and in the voice chat, **Join voice chat** (a link
+  button straight into the call), **Talk** on/off, **End bridge**, and the
+  dropdown to switch coms channel (in place — nobody is disconnected). No
+  separate reply messages; only failures get a private one. The voice chat
+  is deleted when the bridge ends. Opening/ending needs Manage Channels or
+  `COMS_ROLE_ID` (default `ALLOWED_ROLE_ID`).
+- `/voice join channel:#voice coms:<channel>` (Manage Channels) — bridge an
+  existing voice channel instead (never deleted afterwards).
+- Either way a control panel goes in the voice chat's text: who's on coms,
+  and **Talk** / **Leave** buttons.
+  Its dropdown switches which coms channel the voice chat listens and talks
+  on, in place (nobody is disconnected): Talk resets to off, a bot-created
+  voice chat is renamed to match (Discord allows 2 renames per 10 minutes,
+  so quick switching renames a little later), and a channel that won't
+  connect falls back to the previous one.
+- **Listen** is always on: everyone in the voice channel hears coms.
+  **Talk** sends the voice channel's speakers out on coms while it's on —
+  off by default so Discord chatter can't leak onto coms. Only people in
+  the voice channel (or channel managers) can press the buttons.
+- `/voice leave`, `/voice status`. The bridge also leaves by itself after
+  2 minutes with nobody in the voice channel.
+- One bridge per server (Discord allows a bot in one voice channel per
+  server). Starting, stopping and Talk on/off are logged to the studio log.
 
-All three require **Manage Channels** — separate from `ALLOWED_ROLE_ID`
-and Manage Roles, since this is infra-level, not session or role access.
-
-Set `BRIDGE_DISCORD_URL` (and `BRIDGE_DISCORD_API_KEY` if that service has
-one configured) to enable `/voice` — leave both unset and it's disabled
-with a clear message rather than erroring. Deploy `bridge-discord` itself
-separately (its own README covers that); this bot never runs voice
-audio in-process.
-
-**Status**: the control API client
-([src/voice/bridge-client.js](src/voice/bridge-client.js)) is verified
-against a mock server matching the documented contract exactly (create,
-duplicate-id error, get, leave, idempotent re-leave). The actual
-`bridge-discord` service it talks to has not been tested against live
-Discord/LiveKit traffic as of this writing — see its own README's status
-section before relying on this in production.
+Audio is 48 kHz stereo end to end (no resampling): Discord's Opus is
+decoded, speakers mixed, and published as one LiveKit track; every coms
+track is mixed and played into Discord. Neither side hears itself back.
 
 ## Notes / things to tune
 
 - **Tool permissions**: [src/sessions/session.js](src/sessions/session.js)
-  restricts Claude to `Read,Edit,Write,Glob,Grep` and explicitly blocks
-  `Bash` via `--disallowedTools` — the actual enforcement mechanism,
-  verified directly against the CLI (`--allowedTools` alone does **not**
-  reliably block a tool it just omits). Widen this only if you trust
-  everyone with the Discord role, and if you ever add another
-  shell-execution tool to the environment this runs in, block that too.
-- **Bash approval scope**: clicking Approve on a Bash-denial prompt
-  unlocks Bash entirely for that one re-run (`--allowedTools` including
-  `Bash`, no `--disallowedTools`), not just the specific command Claude
-  wanted to run — scoping to the exact command via Claude Code's
-  `Bash(<command>)` allow-list syntax couldn't be cleanly verified against
-  this bot's actual environment (see the commit history around the
-  Approve/Deny feature for why), so the simpler, verified-working version
-  shipped instead. Since the conversation resumes right where it left off,
-  Claude will almost always just run the same command it originally asked
-  for — but the guardrail is "Bash is on for this turn," not "only this
-  exact command."
-- **Detecting a Bash denial has two paths**, not one: the precise one is a
-  real `tool_result` error from an actual attempted call (see
-  `sendMessage` in [src/sessions/session.js](src/sessions/session.js)).
-  The system prompt tells Claude to always attempt the call rather than
-  assume it can't — but that instruction isn't 100% reliable in practice
-  (confirmed recurring live, in fresh sessions, more than once). As a
-  backstop, [src/sessions/reply.js](src/sessions/reply.js)'s
-  `looksLikeBashUnavailableClaim` scans Claude's reply text for the
-  "bash/shell ... isn't available/enabled" pattern and offers the same
-  Approve/Deny prompt even when no real tool call was ever attempted. This
-  is a heuristic, not exact — it's deliberately narrow (requires both a
-  bash/shell mention and an unavailability phrase near each other) to
-  avoid false-triggering on unrelated sentences, but it can still miss
-  phrasings that don't match, or in principle misfire on something
-  genuinely unrelated that happens to read similarly.
+  allows `Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch,TodoWrite`,
+  so Claude can run shell commands inside the session's repo checkout
+  and look things up on the web without asking. The
+  [Dockerfile](Dockerfile) installs Python, build tools, `gh`, `jq` and
+  `zip`/`unzip` for it to use via Bash. Asked to look at another repo
+  for reference, Claude shallow-clones it with `gh` into a sibling
+  `<session dir>-refs` folder (outside the checkout, so it's never
+  committed; deleted when the session closes) — it can reach any repo
+  `GITHUB_TOKEN` can read. Anyone with
+  the Discord role can therefore run arbitrary commands in the bot's
+  container — only give that role to people you trust. Subagents
+  (`Agent`/`Task`) are blocked via `--disallowedTools` so each Discord
+  chat stays a single Claude Code conversation (`--allowedTools` alone
+  does **not** reliably block a tool it just omits — verified against the
+  CLI).
 - **Concurrency**: one message is processed at a time per session
   (`session.busy` guard) — sending another message while Claude is still
   replying gets a "still working" notice rather than queuing or racing.

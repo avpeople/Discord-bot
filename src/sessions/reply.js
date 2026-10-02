@@ -1,4 +1,5 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import path from 'node:path';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 
 export const COMMIT_BUTTON_ID = 'claude-session:commit';
 export const KEEP_GOING_BUTTON_ID = 'claude-session:keep-going';
@@ -6,48 +7,148 @@ export const EXIT_BUTTON_ID = 'claude-session:exit';
 export const OPTION_BUTTON_PREFIX = 'claude-session:option:';
 export const CLOSE_PUSH_BUTTON_ID = 'claude-session:close-push';
 export const CLOSE_EXIT_BUTTON_ID = 'claude-session:close-exit';
-export const APPROVE_BASH_BUTTON_ID = 'claude-session:approve-bash';
-export const DENY_BASH_BUTTON_ID = 'claude-session:deny-bash';
+export const STOP_BUTTON_ID = 'claude-session:stop';
+export const SHOW_CHANGES_BUTTON_ID = 'claude-session:show-changes';
+export const FRESH_START_BUTTON_ID = 'claude-session:fresh-start';
+export const KEEP_ALIVE_BUTTON_ID = 'claude-session:keep-alive';
+export const UNDO_BUTTON_PREFIX = 'claude-session:undo:'; // + turn id
+export const REVERT_BUTTON_PREFIX = 'claude-session:revert:'; // + PR number
+export const REVERT_CONFIRM_PREFIX = 'claude-session:revert-confirm:'; // + PR number
+// Under the repo picker. The ":refresh" variants sit on the status reply
+// itself and update it in place instead of sending a new one.
+export const SESSIONS_STATUS_BUTTON_ID = 'claude-session:sessions-status';
+export const COOLIFY_STATUS_BUTTON_ID = 'claude-session:coolify-status';
+export const STATUS_REFRESH_SUFFIX = ':refresh';
+// Controls under the session's welcome message.
+export const PANEL_MODEL_SELECT_ID = 'claude-session:panel-model';
+export const PANEL_COMMIT_BUTTON_ID = 'claude-session:panel-commit';
+export const PANEL_CLOSE_BUTTON_ID = 'claude-session:panel-close';
+export const PANEL_INIT_BUTTON_ID = 'claude-session:panel-init';
+// Under the repo picker: opens a plain Claude chat channel (no repo).
+export const NEW_CHAT_CHANNEL_BUTTON_ID = 'claude-session:new-chat-channel';
+
+const MODEL_CHOICES = [
+  { value: 'sonnet', label: 'Sonnet', description: 'Fast and cheaper — good for most tasks' },
+  { value: 'opus', label: 'Opus', description: 'Most capable, most expensive' },
+  { value: 'haiku', label: 'Haiku', description: 'Fastest and cheapest — simple tasks' },
+  { value: 'default', label: 'Default', description: "The bot's default model" },
+];
+
+/**
+ * The control panel under a session's welcome message: a model dropdown
+ * (showing the current one), then Commit / Show Changes / Close, plus
+ * Project Notes when the repo has no CLAUDE.md yet. `model` is the
+ * session's model (null = default); `defaultModel` is what "Default"
+ * resolves to (CLAUDE_MODEL, e.g. 'sonnet'), shown in its label — null if
+ * unset, meaning Claude Code's own account default.
+ */
+export function buildSessionPanelRows({ model, hasProjectNotes, defaultModel }) {
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(PANEL_COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+  );
+  if (!hasProjectNotes) {
+    buttons.addComponents(
+      new ButtonBuilder().setCustomId(PANEL_INIT_BUTTON_ID).setLabel('Project Notes').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    );
+  }
+  buttons.addComponents(
+    new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
+  );
+
+  return [buildModelSelectRow(model, defaultModel), buttons];
+}
+
+/** The chat version of the panel: model dropdown and Close — no repo buttons. New chats come from the picker. */
+export function buildChatPanelRows({ model, defaultModel }) {
+  return [
+    buildModelSelectRow(model, defaultModel),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(PANEL_CLOSE_BUTTON_ID).setLabel('Close').setEmoji('🚪').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function buildModelSelectRow(model, defaultModel) {
+  const defaultName = defaultModel
+    ? MODEL_CHOICES.find((c) => c.value === defaultModel)?.label ?? defaultModel
+    : 'account setting';
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(PANEL_MODEL_SELECT_ID)
+    .setPlaceholder('Model')
+    .addOptions(
+      MODEL_CHOICES.map((c) => ({
+        label: c.value === 'default' ? `Model: Default (${defaultName})` : `Model: ${c.label}`,
+        description: c.description,
+        value: c.value,
+        default: c.value === (model ?? 'default'),
+      })),
+    );
+  return new ActionRowBuilder().addComponents(select);
+}
 
 const DISCORD_MAX_LEN = 2000;
 const MAX_OPTIONS = 5;
 
+function truncate(text, max) {
+  const oneLine = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
 /**
- * Fallback for when Claude asserts it can't use Bash/a shell in prose
- * without ever actually attempting the tool call — which means no
- * tool_result denial ever fires (see session.js's OPTIONS_SYSTEM_PROMPT
- * for the primary fix: instructing Claude to always try first). That
- * instruction isn't 100% reliable in practice (confirmed recurring live,
- * even in fresh sessions), so this is a second, independent detection
- * path: scan the final reply text for the pattern "bash/shell ... not
- * available/isn't enabled/can't run" and treat it the same as a real
- * denial, offering the Approve/Deny prompt anyway. Deliberately requires
- * BOTH a bash/shell-tool mention AND an unavailability phrase within a
- * short span of each other, not just either alone, to avoid false
- * positives on unrelated "I can't do X" sentences.
+ * One short progress line for a tool_use block, shown live in the
+ * "Thinking..." message while a turn runs. `dir` is the session's working
+ * directory, used to shorten absolute file paths.
  */
-export function looksLikeBashUnavailableClaim(replyText) {
-  // Pattern A: "bash/shell ... isn't/aren't/not ... available/enabled/possible"
-  //   e.g. "Bash isn't available in this environment"
-  // Pattern B: "no shell/bash access/tool" — a distinct phrasing that
-  //   doesn't fit pattern A's word order at all (confirmed live: "this
-  //   environment has no shell access" matched neither the old pattern
-  //   nor a reworded version of it, so this is a separate alternative
-  //   rather than a tweak to pattern A).
-  // Pattern C: "bash/shell is disabled/off/turned off" — confirmed live:
-  //   "Bash is disabled here" uses a word ("disabled") that fits neither
-  //   pattern A's list (available/enabled/possible) nor pattern B.
-  return (
-    /\b(bash|shell)\b[^.!?\n]{0,80}\b(isn'?t|aren'?t|is not|are not|not)\b[^.!?\n]{0,20}\b(available|enabled|possible)\b/i.test(
-      replyText,
-    ) ||
-    /\bno\b[^.!?\n]{0,20}\b(bash|shell)\b[^.!?\n]{0,20}\b(access|tool)\b/i.test(replyText) ||
-    // Negative lookahead excludes "bash profile/script/alias/function is
-    // disabled", which is about shell config, not the Bash tool itself.
-    /\b(bash|shell)\b(?![^.!?\n]{0,15}\b(profile|script|alias|function)\b)[^.!?\n]{0,40}\b(is|are|'s)\b[^.!?\n]{0,20}\b(disabled|off|turned off)\b/i.test(
-      replyText,
-    )
-  );
+export function describeToolUse(block, dir) {
+  const input = block.input ?? {};
+  const file = (p) => `\`${truncate(p && path.isAbsolute(p) ? path.relative(dir, p) || p : p, 60)}\``;
+  switch (block.name) {
+    case 'Read':
+      return `📖 Reading ${file(input.file_path)}`;
+    case 'Edit':
+    case 'MultiEdit':
+      return `✏️ Editing ${file(input.file_path)}`;
+    case 'Write':
+      return `📝 Writing ${file(input.file_path)}`;
+    case 'Bash':
+      return `⚙️ Running \`${truncate(input.command, 70)}\``;
+    case 'Grep':
+      return `🔎 Searching for \`${truncate(input.pattern, 50)}\``;
+    case 'Glob':
+      return `🔎 Finding files \`${truncate(input.pattern, 50)}\``;
+    case 'WebSearch':
+      return `🌐 Searching the web for "${truncate(input.query, 60)}"`;
+    case 'WebFetch':
+      return `🌐 Reading ${truncate(input.url, 70)}`;
+    case 'TodoWrite':
+      return '📋 Updating its task list';
+    default:
+      return `🔧 ${block.name}`;
+  }
+}
+
+/**
+ * "3 tool calls · 45.2k tokens · ~$0.12" from a turn's `result` event
+ * (`usage` + `total_cost_usd`, reported by Claude Code at the end of each
+ * turn). Token count includes cached context re-read from earlier in the
+ * conversation, which is why long chats climb. Cost is an estimate on
+ * subscription logins. Pieces the event doesn't carry are left out.
+ */
+export function formatTurnStats(result, toolCallCount) {
+  const parts = [];
+  if (toolCallCount > 0) parts.push(`${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}`);
+  const u = result?.usage;
+  if (u) {
+    const tokens =
+      (u.input_tokens ?? 0) +
+      (u.output_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0);
+    parts.push(tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k tokens` : `${tokens} tokens`);
+  }
+  if (typeof result?.total_cost_usd === 'number') parts.push(`~$${result.total_cost_usd.toFixed(2)}`);
+  return parts.join(' · ');
 }
 
 /** Splits long text into Discord-message-sized chunks, breaking on newlines where possible. */
@@ -110,11 +211,29 @@ export function buildOpenSessionRow(guildId, channelId) {
   );
 }
 
+const TEMPORARY_NOTICE_MS = 10_000;
+
 /**
- * The Commit / Keep Going / Exit action row shown after each Claude reply.
- * Commit commits everything changed so far, opens a PR, and immediately
- * merges it into the default branch (see manager.js commitAndMerge).
- * Exit closes the session (discarding anything uncommitted).
+ * Posts `payload` as a plain message in `channel` and deletes it after ~10s
+ * — used under the picker when a session or chat starts. A plain message
+ * rather than an interaction reply, so Discord doesn't show the picker
+ * message quoted above it. Mentions are shown but never ping.
+ */
+export async function postTemporaryNotice(channel, payload) {
+  const message = await channel.send({ ...payload, allowedMentions: { parse: [] } });
+  setTimeout(() => {
+    message.delete().catch(() => {});
+  }, TEMPORARY_NOTICE_MS);
+}
+
+/**
+ * The Commit / Keep Going / Show Changes / Fresh Start / Exit action row
+ * shown after each Claude reply. Commit commits everything changed so far,
+ * opens a PR, and immediately merges it into the default branch (see
+ * manager.js commitAndMerge). Show Changes lists what Commit would include.
+ * Fresh Start clears Claude's conversation history (not the files) to cut
+ * per-message cost. Exit closes the session (discarding anything
+ * uncommitted).
  *
  * Once Commit or Keep Going is clicked on a given message, that message's
  * row collapses to just a disabled "used" version of whichever was
@@ -126,7 +245,7 @@ export function buildPostReplyRow({ used } = {}) {
 
   if (used === 'commit') {
     row.addComponents(
-      new ButtonBuilder().setCustomId('noop:committed').setLabel('Committed ✓').setStyle(ButtonStyle.Success).setDisabled(true),
+      new ButtonBuilder().setCustomId('noop:committed').setLabel('Pushed Live ✓').setStyle(ButtonStyle.Success).setDisabled(true),
     );
   } else if (used === 'keep-going') {
     row.addComponents(
@@ -134,8 +253,10 @@ export function buildPostReplyRow({ used } = {}) {
     );
   } else {
     row.addComponents(
-      new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Commit').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(COMMIT_BUTTON_ID).setLabel('Push Live').setEmoji('🚀').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(KEEP_GOING_BUTTON_ID).setLabel('Keep Going').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SHOW_CHANGES_BUTTON_ID).setLabel('Show Changes').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(FRESH_START_BUTTON_ID).setLabel('Fresh Start').setStyle(ButtonStyle.Secondary),
     );
   }
 
@@ -143,18 +264,61 @@ export function buildPostReplyRow({ used } = {}) {
   return row;
 }
 
-/**
- * The Approve / Deny row shown when Claude's turn was denied a tool
- * (currently always Bash — see session.js). Approve re-sends the same
- * message with Bash allowed for that one re-run; Deny leaves Claude's
- * "I can't do that" response as the final answer. No Exit button here —
- * closing mid-approval isn't a case worth a dedicated button, /code close
- * or an Exit on an earlier message still works.
- */
-export function buildBashApprovalRow() {
+/** The row under each reply in a chat session: just Exit. New chats come from the picker. */
+export function buildChatReplyRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(APPROVE_BASH_BUTTON_ID).setLabel('Approve').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(DENY_BASH_BUTTON_ID).setLabel('Deny').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(EXIT_BUTTON_ID).setLabel('Exit').setStyle(ButtonStyle.Danger),
+  );
+}
+
+/**
+ * Second row under a reply that changed files: Undo puts those files back
+ * as they were before this reply (see repo.js snapshotWorkingTree). Only
+ * the latest such reply can be undone — the handler checks the turn id.
+ */
+export function buildUndoRow(turnId, { used = false } = {}) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(used ? `noop:undone:${turnId}` : `${UNDO_BUTTON_PREFIX}${turnId}`)
+      .setLabel(used ? 'Undone ✓' : "Undo This Reply's Changes")
+      .setEmoji('↩️')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(used),
+  );
+}
+
+/** Revert button on the "Committed and merged" message — undoes that merge on GitHub (asks to confirm first). */
+export function buildRevertRow(pullNumber, { used = false } = {}) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(used ? `noop:reverted:${pullNumber}` : `${REVERT_BUTTON_PREFIX}${pullNumber}`)
+      .setLabel(used ? 'Reverted ✓' : 'Revert This Merge')
+      .setEmoji('⏪')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(used),
+  );
+}
+
+export function buildRevertConfirmRow(pullNumber) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${REVERT_CONFIRM_PREFIX}${pullNumber}`)
+      .setLabel(`Yes, revert #${pullNumber}`)
+      .setStyle(ButtonStyle.Danger),
+  );
+}
+
+/** The Stop button on the live "Thinking..." message while a turn runs. */
+export function buildStopRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(STOP_BUTTON_ID).setLabel('Stop').setStyle(ButtonStyle.Danger),
+  );
+}
+
+/** The Keep Alive button on the warning posted shortly before the idle auto-close. */
+export function buildIdleWarningRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(KEEP_ALIVE_BUTTON_ID).setLabel('Keep Alive').setStyle(ButtonStyle.Success),
   );
 }
 
