@@ -98,6 +98,7 @@ import {
 } from './liveu/handlers.js';
 import {
   handleSetSiteChannel,
+  handleShopRefresh,
   handleSiteMessage,
   handleSiteInteraction,
   isSiteInteraction,
@@ -234,6 +235,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'site') {
       if (interaction.options.getSubcommand() === 'set-channel') return handleSetSiteChannel(interaction);
+      if (interaction.options.getSubcommand() === 'shop-refresh') return handleShopRefresh(interaction);
       return;
     }
 

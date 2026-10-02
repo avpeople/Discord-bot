@@ -54,6 +54,14 @@ export async function downloadImage(value) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+/**
+ * Reloads the site's hire list from Rentman now, instead of waiting out its
+ * 10-minute cache. Returns `{ total, added, removed, imagesChanged }` (item names).
+ */
+export async function refreshShop() {
+  return request('POST', '/api/shop/refresh');
+}
+
 // ---- Lists (testimonials, team members, gallery, FAQs): items can be added, changed, moved and removed.
 
 const itemPath = (key, id, suffix = '') => `${fieldPath(key)}/items/${encodeURIComponent(id)}${suffix}`;

@@ -223,6 +223,9 @@ const commands = [
             .addChannelTypes(ChannelType.GuildText),
         ),
     )
+    .addSubcommand((sub) =>
+      sub.setName('shop-refresh').setDescription('Reload the shop from Rentman now (new items and pictures show straight away)'),
+    )
     .toJSON(),
 ];
 

@@ -207,6 +207,12 @@ page load with no commit or deploy.
 - Photos must be JPEG, PNG or WebP up to 10 MB, and are stored as sent
   (not resized).
 
+A **Shop refresh** button sits under each of the bot's replies in the editor
+channel (and `/site shop-refresh` does the same from any channel, same
+editor role). It reloads the site's shop from Rentman straight away instead
+of waiting for its 10-minute cache, and replies with what was added, removed
+or given a new picture.
+
 Set `SITE_CONTENT_URL` and `SITE_CONTENT_API_KEY` (the site's
 `CONTENT_API_KEY`); `SITE_EDITOR_ROLE_ID` picks who may edit, falling back
 to `ALLOWED_ROLE_ID`. If the Activity log is set, each update is logged there.

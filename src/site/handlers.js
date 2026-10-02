@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, Permissions
 import { config } from '../config.js';
 import { chunkMessage, formatTurnStats } from '../sessions/reply.js';
 import { logEvent } from '../log-channel.js';
-import { isConfigured, listFields } from './client.js';
+import { isConfigured, listFields, refreshShop } from './client.js';
 import { applyEdit, runUndo } from './apply.js';
 import { proposeEdits } from './editor.js';
 import { validateEdits, describeEdit } from './edits.js';
@@ -11,6 +11,7 @@ import { getSiteChannelId, setSiteChannelId } from './store.js';
 const APPLY_BUTTON_ID = 'site:apply';
 const CANCEL_BUTTON_ID = 'site:cancel';
 const UNDO_BUTTON_ID = 'site:undo';
+const REFRESH_BUTTON_ID = 'site:refresh';
 
 // What the site accepts (it checks the bytes itself; this just gives a clearer message sooner).
 const IMAGE_CONTENT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -97,6 +98,50 @@ export async function handleSetSiteChannel(interaction) {
   }
 }
 
+// How many item names to list per heading before "…and N more".
+const REFRESH_NAMES_SHOWN = 15;
+
+function refreshLine(heading, names) {
+  if (!Array.isArray(names) || names.length === 0) return null;
+  const shown = names.slice(0, REFRESH_NAMES_SHOWN).join(', ');
+  const more = names.length > REFRESH_NAMES_SHOWN ? ` …and ${names.length - REFRESH_NAMES_SHOWN} more` : '';
+  return `-# • ${heading} (${names.length}): ${shown}${more}`;
+}
+
+/**
+ * The Shop refresh button (and `/site shop-refresh`) — reloads the site's
+ * shop from Rentman straight away. Always answers with a new message, so
+ * the message the button sits under (e.g. a pending proposal) is untouched.
+ */
+export async function handleShopRefresh(interaction) {
+  if (!isEditor(interaction.member)) {
+    await interaction.reply({ content: "You don't have permission to edit the site.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (!isConfigured()) {
+    await interaction.reply({
+      content: "🌐 The website editor isn't set up on the bot yet (`SITE_CONTENT_URL` / `SITE_CONTENT_API_KEY`).",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply();
+  try {
+    const { total, added, removed, imagesChanged } = await refreshShop();
+    const changes = [refreshLine('Added', added), refreshLine('Removed', removed), refreshLine('New picture', imagesChanged)].filter(Boolean);
+    const lines = [
+      `🔄 ${interaction.user} refreshed the shop from Rentman — ${plural(total, 'item')} on the site.`,
+      ...(changes.length > 0 ? changes : ['-# Nothing had changed since the last load.']),
+    ];
+    await interaction.editReply({ content: lines.join('\n').slice(0, 2000), components: [buildRefreshRow()], allowedMentions: { parse: [] } });
+    logEvent(interaction.guildId, `🔄 ${interaction.user} refreshed the website's shop from Rentman.`);
+  } catch (err) {
+    console.error('[site] shop refresh failed:', err);
+    await interaction.editReply(`❌ Couldn't refresh the shop: ${err.message}`.slice(0, 2000));
+  }
+}
+
 /** Downloads a message's photos into memory. Returns `{ images, skipped }` (names of ones the site wouldn't accept). */
 async function downloadImages(message) {
   const images = [];
@@ -114,17 +159,28 @@ async function downloadImages(message) {
   return { images, skipped };
 }
 
+// Goes under every reply in the editor channel, next to whatever else is there.
+function refreshButton() {
+  return new ButtonBuilder().setCustomId(REFRESH_BUTTON_ID).setLabel('Shop refresh').setEmoji('🔄').setStyle(ButtonStyle.Secondary);
+}
+
 function buildProposalRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(APPLY_BUTTON_ID).setLabel('Apply to site').setEmoji('✅').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(CANCEL_BUTTON_ID).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    refreshButton(),
   );
 }
 
 function buildUndoRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(UNDO_BUTTON_ID).setLabel('Undo').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+    refreshButton(),
   );
+}
+
+function buildRefreshRow() {
+  return new ActionRowBuilder().addComponents(refreshButton());
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -177,12 +233,14 @@ export async function handleSiteMessage(message) {
 
     const chunks = chunkMessage(body || "I couldn't work out a change from that — try rephrasing it.");
     await thinking.edit({ content: chunks[0], allowedMentions: { parse: [] } });
+    let last = thinking;
     for (const extra of chunks.slice(1)) {
-      await message.channel.send({ content: extra, allowedMentions: { parse: [] } });
+      last = await message.channel.send({ content: extra, allowedMentions: { parse: [] } });
     }
 
     if (edits.length === 0) {
-      if (stats) await message.channel.send(`-# ${stats}`);
+      if (stats) await message.channel.send({ content: `-# ${stats}`, components: [buildRefreshRow()] });
+      else await last.edit({ components: [buildRefreshRow()] });
       return;
     }
     const prompt = await message.channel.send({
@@ -208,7 +266,7 @@ function appliedLabel(edit) {
 async function handleApply(interaction) {
   const entry = pendingByMessage.get(interaction.message.id);
   if (!entry) {
-    await interaction.update({ content: '⌛ This proposal has expired — send the request again.', components: [] });
+    await interaction.update({ content: '⌛ This proposal has expired — send the request again.', components: [buildRefreshRow()] });
     return;
   }
   pendingByMessage.delete(interaction.message.id);
@@ -245,7 +303,7 @@ async function handleApply(interaction) {
   if (undoSteps.length > 0) rememberCapped(undoByMessage, interaction.message.id, undoSteps);
   await interaction.editReply({
     content: lines.join('\n').slice(0, 2000),
-    components: undoSteps.length > 0 ? [buildUndoRow()] : [],
+    components: [undoSteps.length > 0 ? buildUndoRow() : buildRefreshRow()],
     allowedMentions: { parse: [] },
   });
   if (applied.length > 0) {
@@ -257,7 +315,7 @@ async function handleApply(interaction) {
 async function handleCancel(interaction) {
   pendingByMessage.delete(interaction.message.id);
   remember(interaction.channelId, 'assistant', '(The person cancelled those changes; nothing was applied.)');
-  await interaction.update({ content: `🚫 ${interaction.user} cancelled — nothing was changed.`, components: [], allowedMentions: { parse: [] } });
+  await interaction.update({ content: `🚫 ${interaction.user} cancelled — nothing was changed.`, components: [buildRefreshRow()], allowedMentions: { parse: [] } });
 }
 
 async function handleUndo(interaction) {
@@ -267,7 +325,7 @@ async function handleUndo(interaction) {
     return;
   }
   undoByMessage.delete(interaction.message.id);
-  await interaction.update({ components: [] });
+  await interaction.update({ components: [buildRefreshRow()] });
 
   const failed = [];
   // Newest first, so list items go back into the positions they came from.
@@ -285,12 +343,13 @@ async function handleUndo(interaction) {
   logEvent(interaction.guildId, `↩️ ${interaction.user} undid a website update.`);
 }
 
-/** Apply / Cancel under a proposal, and Undo under an applied one. */
+/** Apply / Cancel under a proposal, Undo under an applied one, and Shop refresh under any of them. */
 export async function handleSiteInteraction(interaction) {
   if (!isEditor(interaction.member)) {
     await interaction.reply({ content: "You don't have permission to edit the site.", flags: MessageFlags.Ephemeral });
     return;
   }
+  if (interaction.customId === REFRESH_BUTTON_ID) return handleShopRefresh(interaction);
   if (interaction.customId === APPLY_BUTTON_ID) return handleApply(interaction);
   if (interaction.customId === CANCEL_BUTTON_ID) return handleCancel(interaction);
   if (interaction.customId === UNDO_BUTTON_ID) return handleUndo(interaction);
