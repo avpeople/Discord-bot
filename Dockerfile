@@ -41,4 +41,10 @@ RUN mkdir -p /data/claude-config /data/workspaces
 ENV CLAUDE_CONFIG_DIR=/data/claude-config
 ENV WORKSPACE_DIR=/data/workspaces
 
+# Health check Coolify reads (shows running:healthy / running:unhealthy).
+# /health returns 200 only while the bot is connected to Discord (see
+# src/notify-server.js). The start period covers login and startup work.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${NOTIFY_PORT:-8790}/health" > /dev/null || exit 1
+
 CMD ["node", "src/index.js"]

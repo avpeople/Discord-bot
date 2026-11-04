@@ -82,7 +82,7 @@ import { PERSISTENT_REPO_SELECT_ID } from './sessions/repo-picker.js';
 import { handleSetLogChannel, handleSetStudioLogChannel, handleSetCoolifyLogChannel } from './log-channel-handlers.js';
 import { startCoolifyMonitor } from './coolify-monitor.js';
 import { initLogChannel } from './log-channel.js';
-import { startNotifyServer } from './notify-server.js';
+import { startHttpServer } from './notify-server.js';
 import { initUsageBarEmojis } from './usage-bar-emojis.js';
 import { registerCommands } from './register-commands.js';
 import { handleCoolifyControl } from './coolify-controls.js';
@@ -153,7 +153,6 @@ client.once('ready', async () => {
   await registerCommands().catch((err) => console.error('Failed to register slash commands:', err));
   initLogChannel(client);
   startCoolifyMonitor(client);
-  startNotifyServer();
   startLiveuMonitor(client);
   initComs(client).catch((err) => console.error('[coms] init failed:', err));
 
@@ -405,5 +404,9 @@ client.on('messageCreate', async (message) => {
     await message.reply(`❌ Something went wrong: ${err.message}`.slice(0, 2000)).catch(() => {});
   }
 });
+
+// Started before login so /health answers (503 "starting") straight away,
+// rather than refusing connections until Discord is ready.
+startHttpServer(client);
 
 client.login(config.discord.token);
