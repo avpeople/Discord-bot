@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { Status } from 'discord.js';
 import { config } from './config.js';
 import { logEvent } from './log-channel.js';
 
@@ -8,8 +9,16 @@ import { logEvent } from './log-channel.js';
  * bot needing to share a Docker network with them — publicly reachable,
  * gated by a required `x-api-key` header matching NOTIFY_API_KEY.
  *
- * Entirely disabled (no port opened) if NOTIFY_API_KEY is unset, so this
- * is opt-in and inert by default for anyone running the bot without it.
+ * The server itself always listens on NOTIFY_PORT, because it also serves
+ * the container health check (GET /health) that Docker / Coolify poll.
+ * The /notify route is only enabled if NOTIFY_API_KEY is set — without it,
+ * POST /notify returns 404, so it stays opt-in and inert by default.
+ *
+ * Contract: GET /health
+ *   -> 200 { "status": "ok", ... } while the Discord gateway connection is
+ *      ready, 503 { "status": "starting" | "disconnected", ... } otherwise
+ *      (before login finishes, or while reconnecting). No auth — it exposes
+ *      nothing beyond up/down and uptime.
  *
  * Contract: POST /notify
  *   headers: x-api-key: <NOTIFY_API_KEY>
@@ -21,14 +30,24 @@ import { logEvent } from './log-channel.js';
  *   -> 204 on success (or on a silent no-op — see logEvent, which never
  *      throws), 400 on a malformed request, 401 on a missing/wrong key
  */
-export function startNotifyServer() {
+export function startHttpServer(client) {
   if (!config.notify.apiKey) {
-    console.log('NOTIFY_API_KEY not set — inbound /notify endpoint disabled.');
-    return null;
+    console.log('NOTIFY_API_KEY not set — inbound /notify endpoint disabled (/health still served).');
   }
 
   const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url.split('?')[0] !== '/notify') {
+    const path = req.url.split('?')[0];
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && path === '/health') {
+      const ready = client.ws.status === Status.Ready;
+      const status = ready ? 'ok' : client.readyAt ? 'disconnected' : 'starting';
+      res
+        .writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        .end(req.method === 'HEAD' ? undefined : JSON.stringify({ status, uptimeSeconds: Math.round(process.uptime()) }));
+      return;
+    }
+
+    if (!config.notify.apiKey || req.method !== 'POST' || path !== '/notify') {
       res.writeHead(404).end();
       return;
     }
@@ -73,7 +92,7 @@ export function startNotifyServer() {
   });
 
   server.listen(config.notify.port, () => {
-    console.log(`Notify server listening on :${config.notify.port}`);
+    console.log(`HTTP server listening on :${config.notify.port} (/health${config.notify.apiKey ? ', /notify' : ''})`);
   });
 
   return server;

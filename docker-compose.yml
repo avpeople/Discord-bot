@@ -5,9 +5,17 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      # Only actually listens if NOTIFY_API_KEY is set (see src/notify-server.js) —
-      # harmless to publish otherwise, the port just won't be open inside the container.
+      # Always listens (serves GET /health); POST /notify is only enabled
+      # if NOTIFY_API_KEY is set. See src/notify-server.js.
       - "${NOTIFY_PORT:-8790}:${NOTIFY_PORT:-8790}"
+    # Same check as the Dockerfile HEALTHCHECK, so Coolify sees health
+    # whether it builds from the Dockerfile or this compose file.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:$${NOTIFY_PORT:-8790}/health > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}

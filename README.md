@@ -217,6 +217,18 @@ Set `SITE_CONTENT_URL` and `SITE_CONTENT_API_KEY` (the site's
 `CONTENT_API_KEY`); `SITE_EDITOR_ROLE_ID` picks who may edit, falling back
 to `ALLOWED_ROLE_ID`. If the Activity log is set, each update is logged there.
 
+## Health check
+
+The bot serves `GET /health` on `NOTIFY_PORT` (default 8790). It returns
+200 `{"status":"ok"}` while the bot is connected to Discord, and 503
+(`"starting"` or `"disconnected"`) otherwise. No auth needed.
+
+The `Dockerfile` has a `HEALTHCHECK` that calls it every 30s (60s start
+period, marked unhealthy after 3 failures in a row), and
+`docker-compose.yml` has the same check. Coolify reads this and shows the
+app as `running:healthy` or `running:unhealthy`, which the bot's own
+Coolify status view also picks up.
+
 ## Studio monitoring (optional)
 
 `/studio set-log-channel channel:#studio-events` (requires **Manage
@@ -231,8 +243,9 @@ directly — the bot doesn't poll anything. See
 - `POST /notify` with header `x-api-key: <NOTIFY_API_KEY>` and body
   `{ "message": "...", "guildId": "...", "kind": "studio" }` — `guildId`
   defaults to `DISCORD_GUILD_ID` if omitted, `kind` defaults to `"studio"`.
-- Entirely disabled (no port opened) unless `NOTIFY_API_KEY` is set —
-  opt-in, inert by default.
+- `/notify` is disabled (returns 404) unless `NOTIFY_API_KEY` is set:
+  opt-in, inert by default. The port itself is always open, because the
+  same server answers the health check (see below).
 - The port is public (not on an internal Docker network with whatever's
   calling it — see the commit history for why: each Coolify app gets its
   own isolated network by default, and joining a shared one was more
